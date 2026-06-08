@@ -1,0 +1,51 @@
+# ── 密钥 / 凭证 (绝不上传) ────────────────────────────────
+pipeline/key
+pipeline/key.pub
+*.pem
+*_rsa
+*_ed25519
+.env
+.env.*
+
+# ── 大体积原始数据 / 解析中间产物 ─────────────────────────
+cnki/
+mineru_result/
+uniparser_result/
+uploads/
+pdf/
+
+# ── 本地向量库 / 锁文件 ──────────────────────────────────
+*.db
+*.db.lock
+milvus_lite.db
+
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.benchmarks/
+
+# ── 虚拟环境 ────────────────────────────────────────────
+.venv-api/
+.venv/
+venv/
+env/
+
+# ── Node / 前端构建产物 ─────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+node_modules/
+
+# ── 日志 ────────────────────────────────────────────────
+logs/
+*.log
+
+# ── 操作系统 / 编辑器 ───────────────────────────────────
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# ── 本地 agent / 工具缓存 ───────────────────────────────
+.claude/

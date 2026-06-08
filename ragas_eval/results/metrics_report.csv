@@ -1,0 +1,5 @@
+eval_kind,count,success,gold_context_recall,exact_answer_hit,avg_latency_s
+doc_scoped_retrieval,321,321,0.8531,0.6293,0.27
+fact_retrieval,600,597,0.6957,0.4717,5.547
+generation,197,197,0.5108,0.198,5.203
+ALL,1118,1115,0.7083,0.4687,3.967

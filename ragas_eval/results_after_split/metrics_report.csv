@@ -1,0 +1,4 @@
+eval_kind,count,success,gold_context_recall,exact_answer_hit,avg_latency_s
+fact_retrieval,120,120,0.4042,0.35,5.551
+generation,40,40,0.3875,0.2,5.257
+ALL,160,160,0.4,0.3125,5.478

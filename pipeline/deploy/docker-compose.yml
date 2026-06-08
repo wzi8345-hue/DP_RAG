@@ -1,0 +1,141 @@
+version: "3.8"
+
+# ── 环境变量 (按需修改) ──────────────────────────────────────
+x-common-env: &common-env
+  # API Key 认证 (逗号分隔; 留空则不鉴权)
+  API_KEYS: ""
+  # Milvus / 远程 API 的认证信息
+  MINERU_AUTHORIZATION: "${MINERU_AUTHORIZATION:-}"
+  UNIPARSER_API_KEY: "${UNIPARSER_API_KEY:-}"
+
+services:
+  # ── Milvus 向量数据库 ──────────────────────────────────────
+  milvus:
+    image: milvusdb/milvus:v2.4.17
+    container_name: dp-rag-milvus
+    # 单容器嵌入式 etcd + 本地存储模式: 必须显式以 standalone 方式启动
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus-data:/var/lib/milvus
+      - ./embedEtcd.yaml:/milvus/configs/embedEtcd.yaml
+      - ./user.yaml:/milvus/configs/user.yaml
+    environment:
+      ETCD_USE_EMBED: "true"
+      ETCD_DATA_DIR: "/var/lib/milvus/etcd"
+      ETCD_CONFIG_PATH: "/milvus/configs/embedEtcd.yaml"
+      COMMON_STORAGETYPE: "local"
+      DEPLOY_MODE: "STANDALONE"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      retries: 30
+      start_period: 90s
+    restart: unless-stopped
+
+  # ── vLLM: LLM (Qwen3.5-9B) ───────────────────────────────
+  vllm-llm:
+    image: vllm/vllm-openai:latest
+    container_name: dp-rag-vllm-llm
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "0"   # GPU 0
+    volumes:
+      - ${MODEL_DIR:-/data/models}:/models:ro
+    command: >
+      --model /models/Qwen3.5-9B
+      --served-model-name /models/Qwen3.5-9B
+      --port 8000
+      --max-model-len 8192
+      --gpu-memory-utilization 0.90
+      --enable-auto-tool-choice
+      --tool-call-parser hermes
+      --trust-remote-code
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
+  # ── vLLM: Reranker (Qwen3-Reranker-4B) ────────────────────
+  vllm-rerank:
+    image: vllm/vllm-openai:latest
+    container_name: dp-rag-vllm-rerank
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "1"   # GPU 1
+    volumes:
+      - ${MODEL_DIR:-/data/models}:/models:ro
+    command: >
+      --model /models/Qwen3-Reranker-4B
+      --served-model-name /models/Qwen3-Reranker-4B
+      --port 8000
+      --gpu-memory-utilization 0.85
+      --trust-remote-code
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
+  # ── vLLM: Embedding (Qwen3-Embedding-4B) ──────────────────
+  vllm-emb:
+    image: vllm/vllm-openai:latest
+    container_name: dp-rag-vllm-emb
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "1"   # GPU 1 (与 Reranker 共享)
+    volumes:
+      - ${MODEL_DIR:-/data/models}:/models:ro
+    command: >
+      --model /models/Qwen3-Embedding-4B
+      --served-model-name /models/Qwen3-Embedding-4B
+      --port 8000
+      --gpu-memory-utilization 0.45
+      --trust-remote-code
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
+  # ── Pipeline API ──────────────────────────────────────────
+  pipeline-api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: dp-rag-api
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../deploy/prod_config.yaml:/app/prod_config.yaml:ro
+      - ${DATA_DIR:-/data}/uploads:/app/uploads
+      - ${DATA_DIR:-/data}/mineru_result:/app/mineru_result
+      - ${DATA_DIR:-/data}/uniparser_result:/app/uniparser_result
+    environment:
+      <<: *common-env
+      CONFIG_PATH: "/app/prod_config.yaml"
+      UPLOAD_DIR: "/app/uploads"
+      SESSION_TTL: "1800"
+      TASK_MAX_WORKERS: "2"
+      CORS_ORIGINS: "*"
+    depends_on:
+      vllm-llm:
+        condition: service_healthy
+      vllm-rerank:
+        condition: service_healthy
+      vllm-emb:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  milvus-data:

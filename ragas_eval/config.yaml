@@ -1,0 +1,86 @@
+# RAGAS 评估配置
+# 用于评估 DP-RAG Pipeline 的检索与生成质量
+
+# ── Pipeline 配置 ────────────────────────────────────────────────────────
+# 指向 pipeline 的配置文件路径 (相对于 ragas_eval 目录)
+pipeline_config: "../pipeline/default_config.yaml"
+
+# ── Milvus 评测覆盖 ────────────────────────────────────────────────────────
+# evaluate.py 会把这里作为运行时覆盖传给 pipeline, 确保评测检索远程 Milvus Server,
+# 而不是本地 milvus_lite.db。若远程地址不是本机 Docker, 改 server.uri 即可。
+milvus_override:
+  backend: "server"
+  server:
+    uri: "http://localhost:19530"
+    token: ""
+    db_name: ""
+  collection: "literature_chunks"
+
+# ── 评估模式 ──────────────────────────────────────────────────────────────
+# "retrieval"  - 仅评估检索 (Context Precision / Context Recall)
+# "full"       - 检索 + 生成全链路评估 (含 Faithfulness / Answer Relevancy)
+mode: "retrieval"
+
+# true=只跑检索/上下文构建, 不调用最终总结生成 LLM 节点, 用于观察检索效率
+retrieval_only: true
+
+# ── 数据集 ────────────────────────────────────────────────────────────────
+# 测试数据集路径 (JSON 格式)
+# 新数据集 (gen_qa_dataset.py + IN_CORPUS_ONLY) 出生即带 in_corpus/doc_id/eval_kind;
+# 旧数据集需先跑 synthetic_qa_gen/backfill_dataset.py 回填。
+dataset: "../synthetic_qa_gen/test_dataset_all.json"
+
+# ── 数据集过滤 ────────────────────────────────────────────────────────────
+filter:
+  # 只评指定 eval_kind。默认两类可做检索召回打分; generation/skip_auto 不进检索指标。
+  eval_kinds: ["fact_retrieval", "doc_scoped_retrieval", "generation", "skip_auto"]
+  # 只评指定 query_type; null=全部 (在 eval_kinds 基础上再细分)
+  query_types: null
+  # false=不按 in_corpus 字段过滤, 对数据集全量评测
+  in_corpus_only: false
+
+# 召回返回条数 (doc_scoped 硬过滤检索 / 影响 gold 命中机会)
+top_k: 8
+
+# eval_retrieval.py 专用: 计算 recall@k 的 k 列表 (只检索不生成的专项评测)
+retrieval_ks: [5, 10, 20]
+
+# eval_retrieval.py 专用: 是否在召回后过 reranker 重排再算 recall@k。
+#   false → 测"召回上限"(rerank 之前的候选质量, 默认)
+#   true  → 先召回 rerank_candidates 个候选, 过 reranker 重排取 top-max_k,
+#           验证"gold 在 top-N 但排不进 top-k"的差距能否被 rerank 补上 (production 链路本就带 rerank)
+rerank_eval: true
+rerank_candidates: 40
+
+# ── gold-context 文本重叠命中 ──────────────────────────────────────────────
+# gold 块中长度 >= 该值的连续片段出现在召回 chunk 里即判命中 (库与gold切块不一致, 用文本重叠)
+gold_overlap_window: 20
+
+# 是否运行 RAGAS (需外部 LLM/API)。只看检索效率时关闭, 避免额外模型调用干扰耗时。
+run_ragas: false
+
+# ── RAGAS LLM 配置 ────────────────────────────────────────────────────────
+# RAGAS 内部用于计算指标 (如 faithfulness 判断) 的 LLM
+# 使用 OpenAI 兼容接口
+ragas_llm:
+  api_base: "https://api.gpugeek.com/v1"
+  model: "Vendor2/GPT-5-mini"
+  api_key: "00ilsqru12sxx301000di4oxj0ne7mx800n84hks"
+
+# RAGAS embeddings 配置 (用于 Answer Relevancy 指标)
+ragas_embeddings:
+  api_base: "https://ms-vjqjknwp-100037631824-sw.gw.ap-beijing.ti.tencentcs.com/ms-vjqjknwp/v1"
+  model: "model"
+  api_key: "56d2ee9710d55c4"
+
+# ── 评估指标 ──────────────────────────────────────────────────────────────
+# 可选指标: context_precision, context_recall, faithfulness, answer_relevancy
+# retrieval 模式默认只启用前两个
+metrics:
+  - context_precision
+  - context_recall
+  # - faithfulness        # 需要 mode=full
+  # - answer_relevancy    # 需要 mode=full
+
+# ── 输出 ──────────────────────────────────────────────────────────────────
+output_dir: "results"

@@ -1,0 +1,344 @@
+# DP-RAG 生产环境配置 (Docker Compose 专用)
+# 替换 default_config.yaml 中的 localhost 为 Docker 服务名
+
+parsing:
+  backend: "mineru"
+
+mineru:
+  api_url: "https://mineru.net/api/v4/file-urls/batch"
+  # authorization 通过环境变量注入
+  authorization: "${MINERU_AUTHORIZATION}"
+  model_version: "vlm"
+  # 与 docker-compose.yml 的挂载卷对齐 (容器内统一用 /app/*)
+  output_dir: "/app/mineru_result"
+  poll:
+    max_retries: 120
+    interval: 5
+
+uniparser:
+  host: "https://uniparser.dp.tech/"
+  api_key: "${UNIPARSER_API_KEY}"
+  # 与 docker-compose.yml 的挂载卷对齐 (容器内统一用 /app/*)
+  output_dir: "/app/uniparser_result"
+  sync: true
+  request_timeout: 1800
+  poll:
+    max_retries: 120
+    interval: 10
+  parse_modes:
+    textual: "2"
+    equation: "2"
+    table: "2"
+    chart: "-1"
+    figure: "-1"
+    expression: "-1"
+    molecule: "1"
+  output_flags:
+    content: true
+    objects: true
+    pages_dict: true
+    pages_tree: true
+  format_flags:
+    textual: "markdown"
+    table: "markdown"
+    equation: "latex"
+    molecule: "markdown"
+    chart: "markdown"
+    figure: "html"
+
+chunking:
+  summary_title_count: 1
+  summary_sim_threshold: 2
+  content_list_path: null
+  output_path: "knowledge_blocks.json"
+  summary:
+    enabled: true
+    max_summary_sections: 1
+    title_patterns:
+      - "(?i)\\babstract\\b"
+      - "(?i)\\bexecutive\\s+summary\\b"
+      - "(?i)\\bsynopsis\\b"
+      - "(?i)\\bsummary\\b"
+      - "(?i)\\boverview\\b"
+      - "(?i)\\btl;?\\s*dr\\b"
+      - "摘\\s*要"
+      - "概\\s*要"
+    text_patterns:
+      - "(?i)\\babstract\\b\\s*[:：\\-]?"
+      - "(?i)\\bsummary\\b\\s*[:：\\-]?"
+      - "摘\\s*要\\s*[:：\\-]?"
+    stop_patterns:
+      - "(?i)\\bkeywords?\\b\\s*[:：]"
+      - "关\\s*键\\s*词\\s*[:：]"
+    bm25:
+      enabled: true
+      query_texts:
+        - "abstract"
+        - "summary"
+        - "摘要"
+        - "概要"
+      threshold: 0.7
+    embedding:
+      enabled: false
+      threshold: 2
+    llm:
+      enabled: true
+      max_input_chars: 6000
+      api_base: null
+      model: null
+      api_key: null
+  semantic_split:
+    target_chars: 1200
+    max_chars: 2000
+    min_chars: 300
+    breakpoint_percentile: 85
+    size_unit: char
+    overlap: 0
+  references_batch_size: 5
+  uniparser:
+    min_conf: 0.5
+    references_batch_size: 5
+    source: "pages_dict"
+
+# ── 向量化: 指向 Docker 内部 vLLM 服务 ──────────────────────
+embedding:
+  api_base: "http://vllm-emb:8000/v1"
+  model: "/models/Qwen3-Embedding-4B"
+  api_key: "EMPTY"
+  batch_size: 16
+  max_chars: 8000
+  timeout: 120
+  max_retries: 3
+  normalize: true
+  query_instruct:
+    enabled: true
+    instructs:
+      summary: "Given a research topic query, retrieve relevant paper summaries and titles that discuss this topic"
+      passage: "Given a scientific question, retrieve relevant passages from research papers that answer the question"
+      entity: "Given an entity or technical term, retrieve passages that mention this entity"
+  input_path: "knowledge_blocks.json"
+  output_path: "knowledge_blocks_vec.json"
+
+# ── Milvus: 指向 Docker 内部 Milvus 服务 ─────────────────────
+milvus:
+  backend: "server"
+  lite:
+    uri: "./milvus_lite.db"
+    token: ""
+  server:
+    uri: "http://milvus:19530"
+    token: ""
+    db_name: ""
+  uri: "./milvus_lite.db"
+  token: ""
+  collection: "literature_chunks"
+  dim: 2560
+  batch_size: 100
+  recreate: false
+  keepalive_time_ms: 300000
+  keepalive_timeout_ms: 60000
+  bm25:
+    analyzer:
+      type: "chinese"
+  index:
+    dense_type: "AUTOINDEX"
+    dense_metric: "COSINE"
+    dense_params: {}
+
+retrieval:
+  mode: "hybrid"
+  top_k: 8
+  rrf_k: 60
+  per_retriever_k: 15
+  dense_weight: 0.7
+  bm25_weight: 0.3
+  hybrid:
+    mode: router
+    static_dense_weight: 0.7
+    static_bm25_weight: 0.3
+    bias_profiles:
+      balanced:
+        progressive_l1: { dense: 0.65, bm25: 0.35 }
+        progressive_l1_global: { dense: 0.50, bm25: 0.50 }
+        progressive_l2: { dense: 0.55, bm25: 0.45 }
+        local_l2: { dense: 0.45, bm25: 0.55 }
+        simple: { dense: 0.60, bm25: 0.40 }
+      semantic:
+        progressive_l1: { dense: 0.75, bm25: 0.25 }
+        progressive_l1_global: { dense: 0.60, bm25: 0.40 }
+        progressive_l2: { dense: 0.65, bm25: 0.35 }
+        local_l2: { dense: 0.55, bm25: 0.45 }
+        simple: { dense: 0.70, bm25: 0.30 }
+      entity_heavy:
+        progressive_l1: { dense: 0.50, bm25: 0.50 }
+        progressive_l1_global: { dense: 0.35, bm25: 0.65 }
+        progressive_l2: { dense: 0.40, bm25: 0.60 }
+        local_l2: { dense: 0.30, bm25: 0.70 }
+        simple: { dense: 0.45, bm25: 0.55 }
+      keyword:
+        progressive_l1: { dense: 0.55, bm25: 0.45 }
+        progressive_l1_global: { dense: 0.40, bm25: 0.60 }
+        progressive_l2: { dense: 0.45, bm25: 0.55 }
+        local_l2: { dense: 0.35, bm25: 0.65 }
+        simple: { dense: 0.50, bm25: 0.50 }
+    clamp: [0.25, 0.85]
+  summary:
+    top_docs: 15
+    per_query_k: 10
+  progressive:
+    level1_mode: hybrid
+    level1_per_retriever_k: 5
+    l2_per_path_k: 15
+    l2_max_candidate_docs: 10
+    l2_drill_min_score: 0.8
+    enable_global_chunk_fallback: true
+    structural_skip_summary_l1: true
+    experimental_grade_entity_bias: true
+    experimental_l2_drop_nav: true
+    level1_min_docs: 2
+    doc_confidence_threshold: 0.05
+    enable_bm25_summary_fallback: true
+    l1_chunk_probe_k: 20
+    global_fallback_top_k: 20
+    global_fallback_per_retriever_k: 10
+    l2_narrow_top_docs: 5
+    strong_signal_ratio: 1.5
+    enable_probe_short_circuit: true
+  search:
+    dense: { ef: 128 }
+    bm25:
+      drop_ratio_search: 0.0
+  context:
+    max_total_chars: 24000
+    per_route_chars: 10000
+    max_in_prompt: 500
+  langgraph:
+    enabled: true
+    max_retries: 1
+    fallback_on_error: true
+    reflection:
+      enabled: true
+      temperature: 0.0
+      max_tokens: 2000
+      timeout: 100
+      # ── 指向 Docker 内部 vLLM ──
+      api_base: "http://vllm-llm:8000/v1"
+      model: "/models/Qwen3.5-9B"
+      api_key: "EMPTY"
+      disable_thinking_extra_body: true
+      disable_thinking: true
+      summary:
+        snippet_chars: 400
+        max_hits_per_route: 6
+        max_total_chars: 5000
+        max_chars_per_route: 2000
+    reranker:
+      enabled: true
+      # ── 指向 Docker 内部 vLLM Reranker ──
+      api_base: "http://vllm-rerank:8000/v1"
+      model: "/models/Qwen3-Reranker-4B"
+      top_k: 5
+      quality_k: 3
+      quality_threshold: 0.25
+      quality_threshold_by_type:
+        text: 0.30
+        image: 0.10
+        table: 0.10
+        references: 0.15
+      quality_thresholds:
+        default: 0.25
+        by_type:
+          text: 0.30
+          image: 0.10
+          table: 0.10
+          references: 0.15
+        by_route:
+          summary:
+            default: 0.32
+          progressive:
+            l1:
+              text: 0.18
+              default: 0.12
+            l2:
+              text: 0.30
+              image: 0.12
+              table: 0.12
+              references: 0.18
+              default: 0.18
+            l2_global:
+              text: 0.32
+              default: 0.20
+            default: 0.25
+          local:
+            text: 0.30
+            image: 0.12
+            table: 0.12
+            references: 0.20
+            default: 0.18
+          metadata:
+            text: 0.22
+            default: 0.12
+      fail_open_min_emb_quality: null
+      timeout: 60
+      max_retries: 2
+      fail_open: true
+      diagnosis:
+        enabled: true
+        skip_reflect_confidence: 0.90
+        skip_reflect_causes:
+          - wrong_type
+          - wrong_route
+        type_low_ratio: 0.5
+        route_dead_score: 0.15
+        narrow_hit_cap: 2
+        broad_hit_floor: 10
+        wrong_type_strong_confidence: 0.92
+        wrong_type_weak_confidence: 0.78
+        wrong_type_refs_confidence: 0.84
+        wrong_route_confidence: 0.84
+        too_narrow_confidence: 0.72
+        too_narrow_relax_confidence: 0.70
+        too_broad_confidence: 0.75
+        zero_confidence: 0.35
+    observability:
+      tracing: false
+      prometheus: false
+    routing:
+      mode: "fc"
+      enable_multi: true
+      enable_ask: true
+      enable_reuse: true
+      parallel_tool_calls: false
+      history_turns: 1
+      max_paths_per_sub: 2
+      max_subqueries: 3
+      router_disable_thinking: true
+      reflect_disable_thinking: true
+      router_max_tokens: 512
+      reflect_max_tokens: 2048
+
+# ── 生成 LLM: 指向 Docker 内部 vLLM ─────────────────────────
+generation:
+  api_base: "http://vllm-llm:8000/v1"
+  model: "/models/Qwen3.5-9B"
+  api_key: "EMPTY"
+  disable_thinking: true
+  disable_thinking_extra_body: true
+  temperature: 0
+  max_tokens: 3096
+  stream: false
+  timeout: 120
+  max_retries: 3
+  max_history_turns: 5
+  router:
+    api_base: null
+    model: null
+    api_key: null
+    temperature: 0.0
+    max_tokens: 3000
+    timeout: 100
+    max_retries: 1
+    history_turns: 1
+    use_json_schema: false
+  system_prompt_path: null
+  system_prompt: ""

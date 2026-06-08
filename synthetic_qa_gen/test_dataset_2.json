@@ -1,0 +1,718 @@
+[
+  {
+    "question": "这篇文献主要研究了什么？",
+    "ground_truth": "研究了耐候钢中(Al,Mg,Ca,Mn)-oxy-sulfide复合型夹杂物对局部腐蚀的诱发作用，通过SEM/EDS、EBSD、AFM/SKP等表征和浸泡实验，发现夹杂物导致周围金属基体晶格畸变是局部腐蚀的主要原因。",
+    "ground_contexts": [
+      "刘盼 1，胡吉明 1,*，曹发和 2, * （1.浙江大学 化学系，杭州 310027 2. 中山大学 材料学院，广州 510006）摘 要：相较其他钢种而言，耐候钢因无需外部人工涂装，自身具有良好的防护性能而被广泛作为军工市政等项目用材。耐候钢的微观组织结构对其服役行为与防护性能至关重要，而夹杂物诱发的局部腐蚀与耐候钢的组织结构及其应用密切相关。为了探究夹杂物对耐候钢初局部期腐蚀的诱发作用，本研究选取高铁用转向架用材SMA490BW耐候钢中最为常见的球形(Al,Mg, Ca,Mn)-oxy-sulfide复合型夹杂物作为研究对象，并配以采用扫描电镜结合能谱(SEM/EDS)，背散射衍射(EBSD)，原子力显微镜结合扫描开尔文探针(AFM/SKP)等表征技术，以及一系列的浸泡实验(3.5 wt.% NaCl)，系统研究了复合型夹杂物的成分组成和自身的腐蚀演化，及其对耐候钢在模拟海洋环境中的初期腐蚀行为的影响。",
+      "SEM/EDS 结果表明，耐候钢中的(Al, Mg, Ca, Mn)-oxy-sulfide 复合型夹杂物由(Ca, Mn)-sulfide 和(Ca, Al,Mg)-oxy 两部分组成并具有复杂的核壳结构。浸泡结果表明，(Ca, Mn)-sulfide 组分和夹杂物周围局部的金属基体在 NaCl 侵蚀性环境中易于优先溶解。AFM/SKP 结合EBSD 的结果表明，夹杂物虽较金属基体具有较高的伏打电势，但同时显示出较差的电导性且夹杂物周围的金属基体具有较高程度的畸变与位错密度，由此表明传统的微电偶腐蚀效应不是该类复合型夹杂物诱发耐候钢初期局部腐蚀的主要原因，而夹杂物存在导致周围金属基体的晶格畸变更可能是造成该类局部腐蚀的首要原因。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "有没有关于耐候钢中夹杂物诱发腐蚀的研究？",
+    "ground_truth": "有，本文研究了(Al,Mg,Ca,Mn)-oxy-sulfide复合型夹杂物对SMA490BW耐候钢初期局部腐蚀的诱发作用。",
+    "ground_contexts": [
+      "刘盼 1，胡吉明 1,*，曹发和 2, * （1.浙江大学 化学系，杭州 310027 2. 中山大学 材料学院，广州 510006）摘 要：相较其他钢种而言，耐候钢因无需外部人工涂装，自身具有良好的防护性能而被广泛作为军工市政等项目用材。耐候钢的微观组织结构对其服役行为与防护性能至关重要，而夹杂物诱发的局部腐蚀与耐候钢的组织结构及其应用密切相关。为了探究夹杂物对耐候钢初局部期腐蚀的诱发作用，本研究选取高铁用转向架用材SMA490BW耐候钢中最为常见的球形(Al,Mg, Ca,Mn)-oxy-sulfide复合型夹杂物作为研究对象，并配以采用扫描电镜结合能谱(SEM/EDS)，背散射衍射(EBSD)，原子力显微镜结合扫描开尔文探针(AFM/SKP)等表征技术，以及一系列的浸泡实验(3.5 wt.% NaCl)，系统研究了复合型夹杂物的成分组成和自身的腐蚀演化，及其对耐候钢在模拟海洋环境中的初期腐蚀行为的影响。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "耐候钢中复合型夹杂物由哪些部分组成？",
+    "ground_truth": "由(Ca,Mn)-sulfide和(Ca,Al,Mg)-oxy两部分组成，具有复杂的核壳结构。",
+    "ground_contexts": [
+      "SEM/EDS 结果表明，耐候钢中的(Al, Mg, Ca, Mn)-oxy-sulfide 复合型夹杂物由(Ca, Mn)-sulfide 和(Ca, Al,Mg)-oxy 两部分组成并具有复杂的核壳结构。浸泡结果表明，(Ca, Mn)-sulfide 组分和夹杂物周围局部的金属基体在 NaCl 侵蚀性环境中易于优先溶解。AFM/SKP 结合EBSD 的结果表明，夹杂物虽较金属基体具有较高的伏打电势，但同时显示出较差的电导性且夹杂物周围的金属基体具有较高程度的畸变与位错密度，由此表明传统的微电偶腐蚀效应不是该类复合型夹杂物诱发耐候钢初期局部腐蚀的主要原因，而夹杂物存在导致周围金属基体的晶格畸变更可能是造成该类局部腐蚀的首要原因。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "为什么夹杂物会诱发局部腐蚀？",
+    "ground_truth": "传统微电偶腐蚀效应不是主要原因，夹杂物导致周围金属基体晶格畸变和位错密度增加才是主要原因。",
+    "ground_contexts": [
+      "SEM/EDS 结果表明，耐候钢中的(Al, Mg, Ca, Mn)-oxy-sulfide 复合型夹杂物由(Ca, Mn)-sulfide 和(Ca, Al,Mg)-oxy 两部分组成并具有复杂的核壳结构。浸泡结果表明，(Ca, Mn)-sulfide 组分和夹杂物周围局部的金属基体在 NaCl 侵蚀性环境中易于优先溶解。AFM/SKP 结合EBSD 的结果表明，夹杂物虽较金属基体具有较高的伏打电势，但同时显示出较差的电导性且夹杂物周围的金属基体具有较高程度的畸变与位错密度，由此表明传统的微电偶腐蚀效应不是该类复合型夹杂物诱发耐候钢初期局部腐蚀的主要原因，而夹杂物存在导致周围金属基体的晶格畸变更可能是造成该类局部腐蚀的首要原因。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "浸泡实验用了什么条件？",
+    "ground_truth": "3.5 wt.% NaCl溶液模拟海洋环境。",
+    "ground_contexts": [
+      "刘盼 1，胡吉明 1,*，曹发和 2, * （1.浙江大学 化学系，杭州 310027 2. 中山大学 材料学院，广州 510006）摘 要：相较其他钢种而言，耐候钢因无需外部人工涂装，自身具有良好的防护性能而被广泛作为军工市政等项目用材。耐候钢的微观组织结构对其服役行为与防护性能至关重要，而夹杂物诱发的局部腐蚀与耐候钢的组织结构及其应用密切相关。为了探究夹杂物对耐候钢初局部期腐蚀的诱发作用，本研究选取高铁用转向架用材SMA490BW耐候钢中最为常见的球形(Al,Mg, Ca,Mn)-oxy-sulfide复合型夹杂物作为研究对象，并配以采用扫描电镜结合能谱(SEM/EDS)，背散射衍射(EBSD)，原子力显微镜结合扫描开尔文探针(AFM/SKP)等表征技术，以及一系列的浸泡实验(3.5 wt.% NaCl)，系统研究了复合型夹杂物的成分组成和自身的腐蚀演化，及其对耐候钢在模拟海洋环境中的初期腐蚀行为的影响。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "AFM/SKP和EBSD结果说明了什么？",
+    "ground_truth": "夹杂物较金属基体具有较高伏打电势，但导电性差，周围金属基体畸变程度高，表明微电偶效应不是主要原因，晶格畸变更可能是主因。",
+    "ground_contexts": [
+      "SEM/EDS 结果表明，耐候钢中的(Al, Mg, Ca, Mn)-oxy-sulfide 复合型夹杂物由(Ca, Mn)-sulfide 和(Ca, Al,Mg)-oxy 两部分组成并具有复杂的核壳结构。浸泡结果表明，(Ca, Mn)-sulfide 组分和夹杂物周围局部的金属基体在 NaCl 侵蚀性环境中易于优先溶解。AFM/SKP 结合EBSD 的结果表明，夹杂物虽较金属基体具有较高的伏打电势，但同时显示出较差的电导性且夹杂物周围的金属基体具有较高程度的畸变与位错密度，由此表明传统的微电偶腐蚀效应不是该类复合型夹杂物诱发耐候钢初期局部腐蚀的主要原因，而夹杂物存在导致周围金属基体的晶格畸变更可能是造成该类局部腐蚀的首要原因。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "这篇文献的实验方法有哪些？",
+    "ground_truth": "采用扫描电镜结合能谱(SEM/EDS)、背散射衍射(EBSD)、原子力显微镜结合扫描开尔文探针(AFM/SKP)以及浸泡实验(3.5 wt.% NaCl)。",
+    "ground_contexts": [
+      "刘盼 1，胡吉明 1,*，曹发和 2, * （1.浙江大学 化学系，杭州 310027 2. 中山大学 材料学院，广州 510006）摘 要：相较其他钢种而言，耐候钢因无需外部人工涂装，自身具有良好的防护性能而被广泛作为军工市政等项目用材。耐候钢的微观组织结构对其服役行为与防护性能至关重要，而夹杂物诱发的局部腐蚀与耐候钢的组织结构及其应用密切相关。为了探究夹杂物对耐候钢初局部期腐蚀的诱发作用，本研究选取高铁用转向架用材SMA490BW耐候钢中最为常见的球形(Al,Mg, Ca,Mn)-oxy-sulfide复合型夹杂物作为研究对象，并配以采用扫描电镜结合能谱(SEM/EDS)，背散射衍射(EBSD)，原子力显微镜结合扫描开尔文探针(AFM/SKP)等表征技术，以及一系列的浸泡实验(3.5 wt.% NaCl)，系统研究了复合型夹杂物的成分组成和自身的腐蚀演化，及其对耐候钢在模拟海洋环境中的初期腐蚀行为的影响。",
+      "SEM/EDS 结果表明，耐候钢中的(Al, Mg, Ca, Mn)-oxy-sulfide 复合型夹杂物由(Ca, Mn)-sulfide 和(Ca, Al,Mg)-oxy 两部分组成并具有复杂的核壳结构。浸泡结果表明，(Ca, Mn)-sulfide 组分和夹杂物周围局部的金属基体在 NaCl 侵蚀性环境中易于优先溶解。AFM/SKP 结合EBSD 的结果表明，夹杂物虽较金属基体具有较高的伏打电势，但同时显示出较差的电导性且夹杂物周围的金属基体具有较高程度的畸变与位错密度，由此表明传统的微电偶腐蚀效应不是该类复合型夹杂物诱发耐候钢初期局部腐蚀的主要原因，而夹杂物存在导致周围金属基体的晶格畸变更可能是造成该类局部腐蚀的首要原因。"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "《(Al,Mg,Ca,Mn)-oxy-sulfide型夹杂物对耐候钢局部腐蚀的诱发研究》这篇文献的结论是什么？",
+    "ground_truth": "夹杂物存在导致周围金属基体的晶格畸变是局部腐蚀的首要原因，而非传统的微电偶腐蚀效应。",
+    "ground_contexts": [
+      "SEM/EDS 结果表明，耐候钢中的(Al, Mg, Ca, Mn)-oxy-sulfide 复合型夹杂物由(Ca, Mn)-sulfide 和(Ca, Al,Mg)-oxy 两部分组成并具有复杂的核壳结构。浸泡结果表明，(Ca, Mn)-sulfide 组分和夹杂物周围局部的金属基体在 NaCl 侵蚀性环境中易于优先溶解。AFM/SKP 结合EBSD 的结果表明，夹杂物虽较金属基体具有较高的伏打电势，但同时显示出较差的电导性且夹杂物周围的金属基体具有较高程度的畸变与位错密度，由此表明传统的微电偶腐蚀效应不是该类复合型夹杂物诱发耐候钢初期局部腐蚀的主要原因，而夹杂物存在导致周围金属基体的晶格畸变更可能是造成该类局部腐蚀的首要原因。"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "图1说明了什么？",
+    "ground_truth": "图1展示了(Al, Mg, Ca, Mn)-oxy-sulfide复合型夹杂物及其周围金属基体在仅含Cl-环境中的腐蚀演化机理，彩色多边形代表不同取向的晶粒。",
+    "ground_contexts": [
+      "[Section] (Al, Mg, Ca, Mn)-oxy-sulfide 型夹杂物对耐候钢局部腐蚀的诱发研究\n[图片说明] 图 1. (Al, Mg, Ca, Mn)-oxy-sulfide 复合型夹杂物及其周围金属基体在仅含 Cl-环境中的腐蚀演化机理图(图中的彩色多边形代表不同取向的晶粒，多边形并非真实的晶粒形状)"
+    ],
+    "query_type": "metadata_fig"
+  },
+  {
+    "question": "正文中哪里提到了'伏打电势'？",
+    "ground_truth": "在正文第二段：AFM/SKP结合EBSD的结果表明，夹杂物虽较金属基体具有较高的伏打电势。",
+    "ground_contexts": [
+      "SEM/EDS 结果表明，耐候钢中的(Al, Mg, Ca, Mn)-oxy-sulfide 复合型夹杂物由(Ca, Mn)-sulfide 和(Ca, Al,Mg)-oxy 两部分组成并具有复杂的核壳结构。浸泡结果表明，(Ca, Mn)-sulfide 组分和夹杂物周围局部的金属基体在 NaCl 侵蚀性环境中易于优先溶解。AFM/SKP 结合EBSD 的结果表明，夹杂物虽较金属基体具有较高的伏打电势，但同时显示出较差的电导性且夹杂物周围的金属基体具有较高程度的畸变与位错密度，由此表明传统的微电偶腐蚀效应不是该类复合型夹杂物诱发耐候钢初期局部腐蚀的主要原因，而夹杂物存在导致周围金属基体的晶格畸变更可能是造成该类局部腐蚀的首要原因。"
+    ],
+    "query_type": "metadata_entity"
+  },
+  {
+    "question": "这篇文献主要研究了什么？",
+    "ground_truth": "使用Minitab软件和正交试验设计，分析合金元素Cu、Ni、Mo、Mn对耐候钢在模拟海洋大气环境中耐蚀性的显著性影响，确定了最优成分Ni3.15、Mn1.7。",
+    "ground_contexts": [
+      "LI Lin1,2, CHEN Yi-qing1,2, YANG Ying1,2, AI Fang-fang1,2, GAO Peng1,2, ZHONG Bin1,2 (1.State Key Laboratory of Metal Material for Marine Equipment and Application, Anshan 114009; 2.Iron & Steel Research Institute of ANGANG Group, Anshan 114009) Weathering steels were smelted and rolled in laboratory which was based on four factors, two levels and a central point orthogonal experiment design. The effect of alloying elements Cu, Ni, Mo and Mn on corrosion resistance of weathering steels was studied by using outdoor spray test and Minitab analyze. The results showed that Ni and Mo were significant factors for the early stage of simulated outdoor spraying in the ocean atmosphere environment. In the late stage of outdoor spraying, Ni and Mn are significant factors. There is no obvious interaction between Ni and Mo, Ni and Mn. The optimum alloy element content was Ni 3.15, Mn1.7. It is feasible to add alloy elements that have significant influence on corrosion resistance and to control their addition to reduce the cost. Key words：alloying elements；weathering steel；marine atmosphere environment；Minitab； orthogonal test",
+      "- (1)模拟海洋大气环境户外喷淋初期，Ni和Mo是具有显著性影响的因素；户外喷淋后期，Ni和Mn是具有显著性影响的因素；并且Ni和Mo，Ni和Mn之间均无明显交互作用。\n- (2) 本次试验中对户外喷淋后期的腐蚀速率分析，确定最优合金元素含量搭配为Ni3.15，Mn1.7。\n- (3) 在设计耐候钢的合金元素成分时，适当降低合金元素添加的种类，仅添加对耐蚀性具有显著性影响的合金元素并且控制其添加含量以降低成本是可行的。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "有没有关于Minitab在钢铁材料研究中的应用的文献？",
+    "ground_truth": "有，本文即应用Minitab软件分析合金元素对耐候钢腐蚀性能的影响。",
+    "ground_contexts": [
+      "耐候钢中由于添加了适量镍、铜和铬等合金元素使钢铁表面形成一层致密的锈层，与普碳钢相比具有更好的耐蚀性能，因而广泛应用于桥梁、铁路等基础建设[1-3]。研究表明，耐候钢通过添加耐蚀合金元素，其耐蚀性可比普通钢提高2～8倍[4]。但传统耐候钢因采用多种合金元素而使价格偏高，限制了其广泛使用，所以适宜地添加对耐蚀性最有效的合金元素，开发低成本经济耐候钢已成为研究的热点。 Minitab是一种具有资料分析、图形展示、直觉式的使用接口及统计流程操作指引等功能的统计软件，其强大的实验设计(design of experiment, DOE)功能使实验者可方便地通过点击鼠标即可完成实验的设计及数据处理，该软件在医学、电子学和食品科学等研究领域应用较多[5,6]，但在钢铁材料研究中应用开发较少。本工作在耐候钢化学成分的基础上，通过正交试验冶炼轧制 9种不同含量的Cu、Ni、Mo、Mn 成分的耐候试验钢，研究其在模拟海洋大气环境中的耐腐蚀性能。运用 Minitab软件分析四种合金元素对耐候钢耐蚀性影响的显著性，确定了最佳合金成分及含量，为开发低成本耐候钢提供理论依据。",
+      "李琳 1,2，陈义庆 1,2，杨颖 1,2，艾芳芳 1,2，高鹏 1,2，钟彬 1,2 （1.海洋装备用金属材料及其应用国家重点实验室，辽宁 鞍山 114009；2.鞍钢集团钢铁研究院 汽车与家电用钢研究所，辽宁 鞍山 114009）摘要：采用四因素两水平一个中心点正交试验设计合金成分，实验室冶炼轧制耐候钢，采用户外喷淋试验和 Minitab研究了模拟海洋大气环境中合金元素铜、镍、钼和锰对耐候钢耐蚀性的显著性影响。结果表明：模拟海洋大气环境户外喷淋初期，Ni 和 Mo 是具有显著性影响的因素；户外喷淋后期，Ni 和 Mn 是具有显著性影响的因素；并且 Ni 和 Mo，Ni 和 Mn之间均无明显交互作用。最优合金元素含量搭配为Ni 3.15，Mn1.7。适当降低合金元素添加的种类，仅添加对耐蚀性具有显著性影响的合金元素并且控制其添加含量以降低成本是可行的。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "户外喷淋30天和180天分别哪些合金元素对耐蚀性有显著影响？",
+    "ground_truth": "30天：Ni和Mo；180天：Ni和Mn。",
+    "ground_contexts": [
+      "本次试验中，根据Minitab分析结果，模拟海洋大气环境户外喷淋初期(30d)，Ni和Mo是具有显著性影响的因素；户外喷淋后期(180d)，Ni和Mn是具有显著性影响的因素；并且Ni和Mo，Ni和Mn之间均无明显交互作用。",
+      "Fig.4 Pareto diagram fitting the improved standardized effect图3为置信区间95%的标准化效应的Pareto图，可以看出对耐蚀性具有显著影响的元素为Mo，Ni接近参考线值，Mo和Ni的交互作用几乎没有。图4为改进拟合后去掉不显著因素Mo+Ni，置信区间改为90%后的标准化效应图，修改后Mo和Ni均超过参考线值为显著因素。上述Minitab分析结果说明根据户外喷淋30天的腐蚀速率分析四种耐蚀合金的显著性影响，Mo和Ni均是对耐蚀性具有显著影响的因素，并且二者无交互作用。Cu和Mn对户外喷淋30天的腐蚀速率无显著影响。",
+      "表3为9组耐候钢户外喷淋 180d的腐蚀速率值，采用 Minitab 软件，将Cu、Ni、Mn、Mo 四种合金元素作为因子，180d 的腐蚀速率作为响应进行分析，结果见图 5。四种合金元素对腐蚀速率的贡献率 R-Sq(调整)值为 91.4%，观察 P 值，Ni 和 Mn 的 P 值小于 0.05，而Mo 和 Cu 的 P 值大于 0.05，说明 Ni 和 Mn 对户外喷淋 180d 的腐蚀速率具有显著性影响，Mo和Cu则影响较小。图6为去掉不显著因素Mo和 Cu，对Ni和 Mn再次进行回归。图 6中 R-Sq(调整)值为 91.2%，即 Ni 和 Mn 对腐蚀速率的贡献率为 91.2%，不考虑 Mo 和 Cu 的影响后Ni和Mo的P 值显著降低，二者显著性增强。"
+    ],
+    "query_type": "multi"
+  },
+  {
+    "question": "这个方法怎么样？",
+    "ground_truth": "指Minitab软件，它通过正交设计和回归分析，可快速确定各因素的显著性，并给出优化方案。",
+    "ground_contexts": [
+      "耐候钢中由于添加了适量镍、铜和铬等合金元素使钢铁表面形成一层致密的锈层，与普碳钢相比具有更好的耐蚀性能，因而广泛应用于桥梁、铁路等基础建设[1-3]。研究表明，耐候钢通过添加耐蚀合金元素，其耐蚀性可比普通钢提高2～8倍[4]。但传统耐候钢因采用多种合金元素而使价格偏高，限制了其广泛使用，所以适宜地添加对耐蚀性最有效的合金元素，开发低成本经济耐候钢已成为研究的热点。 Minitab是一种具有资料分析、图形展示、直觉式的使用接口及统计流程操作指引等功能的统计软件，其强大的实验设计(design of experiment, DOE)功能使实验者可方便地通过点击鼠标即可完成实验的设计及数据处理，该软件在医学、电子学和食品科学等研究领域应用较多[5,6]，但在钢铁材料研究中应用开发较少。本工作在耐候钢化学成分的基础上，通过正交试验冶炼轧制 9种不同含量的Cu、Ni、Mo、Mn 成分的耐候试验钢，研究其在模拟海洋大气环境中的耐腐蚀性能。运用 Minitab软件分析四种合金元素对耐候钢耐蚀性影响的显著性，确定了最佳合金成分及含量，为开发低成本耐候钢提供理论依据。",
+      "表 2 为 9 组耐候试验钢户外喷淋 30d 的腐蚀速率值，采用 Minitab 软件，将 Cu、Ni、Mn、Mo 四种合金元素作为因子，30d 的腐蚀速率作为响应进行分析。将腐蚀速率与 Cu、Ni、Mn、Mo四种合金元素进行回归分析，结果见图1。四种合金元素对腐蚀速率的贡献率R-Sq(调整)值为 77.4%，观察 P 值，可知 Mo 的 P 值为 0.009 远远小于 0.05，因此 Mo 对腐蚀速率的影响最为显著，Mn 和 Cu 的 P 值远大于 0.05，说明二者对 30d 的腐蚀速率影响较弱。图2为去掉不显著因素 Cu和Mn，对Ni和Mo再次进行回归分析。图2中R-Sq(调整)值为75.1%，Ni和 Mo对腐蚀速率的贡献率为75.1%，不考虑Cu和 Mn的影响后Ni和Mo的P 值显著降低，二者均为显著性因素。"
+    ],
+    "query_type": "ambiguous"
+  },
+  {
+    "question": "为什么Ni能提高耐候钢的耐蚀性？",
+    "ground_truth": "Ni在腐蚀过程中形成NiFe2O4，比Fe3O4更稳定，具有阳离子选择性，可阻止Cl-渗透。",
+    "ground_contexts": [
+      "据文献报道，在规定含量范围内，提高Ni、Mo和Mn等合金元素的含量均有助于提高钢的耐蚀性能[7]。Nishimura等[8]认为，合金元素Ni在腐蚀过程中极易进入锈层中并形成与 $\\mathrm { F e } _ { 3 } \\mathrm { O } _ { 4 }$ 结构相同的尖晶石氧化物 $\\mathrm { N i F e } _ { 2 } \\mathrm { O } _ { 4 }$ ，相比于 $\\mathrm { F e _ { 3 } O _ { 4 } } , ~ \\mathrm { N i F e _ { 2 } O _ { 4 } }$ 的热力学和电化学稳定性更高，从而有利于降低腐蚀速率。此外，研究表明 ${ \\mathrm { N i F e } } _ { 2 } { \\mathrm { O } } _ { 4 }$ 具有阳离子选择透过性，能够阻止海洋环境中的C1-渗透锈层，从而降低钢材的腐蚀速率。Mo通常在锈层中氧化、转化为具有缓蚀作用的钼酸盐，钼酸盐与 $\\mathrm { F e } ^ { 2 + }$ 发生反应生成为 $_ \\mathrm { F e M o O _ { 4 } }$ 的氧化物，抑制试验钢的阳极溶解，增加阳极极化，可以大幅减缓腐蚀的进行[9]。Mn在锈层中以 $\\mathbf { M n O _ { x } }$ 形式存在[10]，可作为 $\\mathrm { F e ( O H ) _ { 6 } }$ 单元的形核点[11]，随着Mn含量的增加，增加形核点的数量，从而形成细小的锈层晶粒，增加锈层的致密性。综上可知，Ni，Mo和Mn在钢中的作用机理不同，Ni主要是形成致密的锈层，并使锈层具有阳离子选择性；Mo作为阳极缓蚀剂提高耐蚀性,在锈层和锈层缺陷处形成不溶性的并阻碍阳极溶解,从而提高耐蚀性；Mn的氧化物可以填充裂纹或孔洞处，使锈层更加致密，从而阻止Cl-向基体的渗透，提高钢的耐蚀性能。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "户外喷淋180天后，最优合金成分是什么？",
+    "ground_truth": "Ni=3.15，Mn=1.7。",
+    "ground_contexts": [
+      "- (1)模拟海洋大气环境户外喷淋初期，Ni和Mo是具有显著性影响的因素；户外喷淋后期，Ni和Mn是具有显著性影响的因素；并且Ni和Mo，Ni和Mn之间均无明显交互作用。\n- (2) 本次试验中对户外喷淋后期的腐蚀速率分析，确定最优合金元素含量搭配为Ni3.15，Mn1.7。\n- (3) 在设计耐候钢的合金元素成分时，适当降低合金元素添加的种类，仅添加对耐蚀性具有显著性影响的合金元素并且控制其添加含量以降低成本是可行的。",
+      "通过分析合金元素的显著性，选取适当的合金元素含量搭配，可以得到耐蚀性能较好的耐候钢。本次试验中对户外喷淋后期(180d)的腐蚀速率分析，根据响应优化的结果，确定耐蚀性能较好的耐候钢的合金元素含量搭配为Ni 3.15，Mn 1.7。在设计耐候钢的合金元素成分时，适当降低合金元素添加的种类，仅添加对耐蚀性具有显著性影响的合金元素并且控制其添加含量以降低成本是可行的。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "这篇文献的参考文献中有没有关于Ni形成NiFe2O4的文献？",
+    "ground_truth": "有，文献[8] NISHIMURA T, KODAMA T。",
+    "ground_contexts": [
+      "- [1] 高新亮,朱苗勇,付贵勤,等.桥梁耐候钢在含Cl-离子环境中的腐蚀行为[J].金属学报，2011，47（5）:520-527\n- [2] 陈勇．耐候钢的发展及开发中的关键技术浅析[J]．新疆钢铁，2006，4：1-3\n- [3] 刘丽宏，齐慧滨，卢燕平，等．耐大气腐蚀钢的研究概况[J].腐蚀科学与防护技术，2003,2：86-89．\n- [4] 陆匠心，李爱柏，李白刚，等．宝钢耐候钢产品开发的现状及展望[J]．中国冶金，2004，12：23-28\n- [5] 冯鑫．Minitab在正交设计优选中药提取工艺中的应用[J]．安徽中医学院报，2007,26(6):49-51．\n- [6] 毛君，尹航，崔闯，等．基于Minitab确定最佳参数的实验设计[J]．煤矿机械,2008，29(8)：14-16．\n- [7] 封辉，姜海昌，戎利建，等．Cu对低合金高强耐候钢耐蚀性的影响[J]．腐蚀科学与防护技术，2011,4：318-322．\n- [8] NISHIMURA T，KODAMA T．Clarification of chemical state for alloying elements in iron rust using a binary-phase potential-pH diagram and physical analyses [J].Corrosion Science， 2003，45(5)：1073-1084\n- [9] 刘志勇，汪兵，等.含钼耐候钢的腐蚀性能[J].北京科技大学学报，2013,35(1)：61-64\n- [10] Kimura M，Kihira H，Hashimoto M. Senuma T．Control of Fe(O,OH).sub.6 nano-network structures of rust for high atmospheric-corrosion resistance [J].Corros Sci，2005,47：2499\n- [11] Liu G C，Dong J H，Han E H，Ke W．INFLUENCE OF Cu AND Mn ON CORROSION BEHAVIOR OF LOW ALLOY STEEL IN A SIMULATED COASTAL ENVIRONMENT[J].\n- Corros Sci Prot Technol, 2008,20(4):235",
+      "据文献报道，在规定含量范围内，提高Ni、Mo和Mn等合金元素的含量均有助于提高钢的耐蚀性能[7]。Nishimura等[8]认为，合金元素Ni在腐蚀过程中极易进入锈层中并形成与 $\\mathrm { F e } _ { 3 } \\mathrm { O } _ { 4 }$ 结构相同的尖晶石氧化物 $\\mathrm { N i F e } _ { 2 } \\mathrm { O } _ { 4 }$ ，相比于 $\\mathrm { F e _ { 3 } O _ { 4 } } , ~ \\mathrm { N i F e _ { 2 } O _ { 4 } }$ 的热力学和电化学稳定性更高，从而有利于降低腐蚀速率。此外，研究表明 ${ \\mathrm { N i F e } } _ { 2 } { \\mathrm { O } } _ { 4 }$ 具有阳离子选择透过性，能够阻止海洋环境中的C1-渗透锈层，从而降低钢材的腐蚀速率。Mo通常在锈层中氧化、转化为具有缓蚀作用的钼酸盐，钼酸盐与 $\\mathrm { F e } ^ { 2 + }$ 发生反应生成为 $_ \\mathrm { F e M o O _ { 4 } }$ 的氧化物，抑制试验钢的阳极溶解，增加阳极极化，可以大幅减缓腐蚀的进行[9]。Mn在锈层中以 $\\mathbf { M n O _ { x } }$ 形式存在[10]，可作为 $\\mathrm { F e ( O H ) _ { 6 } }$ 单元的形核点[11]，随着Mn含量的增加，增加形核点的数量，从而形成细小的锈层晶粒，增加锈层的致密性。综上可知，Ni，Mo和Mn在钢中的作用机理不同，Ni主要是形成致密的锈层，并使锈层具有阳离子选择性；Mo作为阳极缓蚀剂提高耐蚀性,在锈层和锈层缺陷处形成不溶性的并阻碍阳极溶解,从而提高耐蚀性；Mn的氧化物可以填充裂纹或孔洞处，使锈层更加致密，从而阻止Cl-向基体的渗透，提高钢的耐蚀性能。"
+    ],
+    "query_type": "references"
+  },
+  {
+    "question": "这篇论文的实验方法是什么？",
+    "ground_truth": "采用四因素两水平一个中心点正交试验设计，实验室冶炼轧制耐候钢，进行户外喷淋试验，并使用Minitab软件分析。",
+    "ground_contexts": [
+      "李琳 1,2，陈义庆 1,2，杨颖 1,2，艾芳芳 1,2，高鹏 1,2，钟彬 1,2 （1.海洋装备用金属材料及其应用国家重点实验室，辽宁 鞍山 114009；2.鞍钢集团钢铁研究院 汽车与家电用钢研究所，辽宁 鞍山 114009）摘要：采用四因素两水平一个中心点正交试验设计合金成分，实验室冶炼轧制耐候钢，采用户外喷淋试验和 Minitab研究了模拟海洋大气环境中合金元素铜、镍、钼和锰对耐候钢耐蚀性的显著性影响。结果表明：模拟海洋大气环境户外喷淋初期，Ni 和 Mo 是具有显著性影响的因素；户外喷淋后期，Ni 和 Mn 是具有显著性影响的因素；并且 Ni 和 Mo，Ni 和 Mn之间均无明显交互作用。最优合金元素含量搭配为Ni 3.15，Mn1.7。适当降低合金元素添加的种类，仅添加对耐蚀性具有显著性影响的合金元素并且控制其添加含量以降低成本是可行的。",
+      "为了得到最佳含量搭配，在耐候钢化学成分的基础上，设计Cu、Ni、Mo、Mn 四因素、两水平、一个中心点正交试验设计，共轧制 9组耐候试验钢，试验钢具体合金元素及含量如表 1 所示，其他主要合金元素(质量分数，%)为 C 0.035，Si 0.25，P 0.016，S 0.01，Al 0.01。实验室真空熔炼钢坯，在500mm×400mm二辊轧机上进行轧制，开轧1000℃，终轧800℃。",
+      "为了模拟海洋大气环境开展室外加速喷淋试验，试样安置在曝晒试样架上，四周没有遮蔽物，面北朝南，与地平线成 45 度角。每隔一天喷淋一次 1%氯化钠溶液，模拟海洋大气腐蚀环境，试验进行 30天180天的时候各取样一次。"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "图3说明了什么？",
+    "ground_truth": "图3为置信区间95%的标准化效应的Pareto图，显示Mo为显著因素，Ni接近参考线，交互作用不显著。",
+    "ground_contexts": [
+      "Fig.4 Pareto diagram fitting the improved standardized effect图3为置信区间95%的标准化效应的Pareto图，可以看出对耐蚀性具有显著影响的元素为Mo，Ni接近参考线值，Mo和Ni的交互作用几乎没有。图4为改进拟合后去掉不显著因素Mo+Ni，置信区间改为90%后的标准化效应图，修改后Mo和Ni均超过参考线值为显著因素。上述Minitab分析结果说明根据户外喷淋30天的腐蚀速率分析四种耐蚀合金的显著性影响，Mo和Ni均是对耐蚀性具有显著影响的因素，并且二者无交互作用。Cu和Mn对户外喷淋30天的腐蚀速率无显著影响。",
+      "图3 标准化效应的Pareto图"
+    ],
+    "query_type": "metadata_fig"
+  },
+  {
+    "question": "正文里提到NiFe2O4的段落是哪个？",
+    "ground_truth": "在3.3讨论部分，提到Ni形成NiFe2O4。",
+    "ground_contexts": [
+      "据文献报道，在规定含量范围内，提高Ni、Mo和Mn等合金元素的含量均有助于提高钢的耐蚀性能[7]。Nishimura等[8]认为，合金元素Ni在腐蚀过程中极易进入锈层中并形成与 $\\mathrm { F e } _ { 3 } \\mathrm { O } _ { 4 }$ 结构相同的尖晶石氧化物 $\\mathrm { N i F e } _ { 2 } \\mathrm { O } _ { 4 }$ ，相比于 $\\mathrm { F e _ { 3 } O _ { 4 } } , ~ \\mathrm { N i F e _ { 2 } O _ { 4 } }$ 的热力学和电化学稳定性更高，从而有利于降低腐蚀速率。此外，研究表明 ${ \\mathrm { N i F e } } _ { 2 } { \\mathrm { O } } _ { 4 }$ 具有阳离子选择透过性，能够阻止海洋环境中的C1-渗透锈层，从而降低钢材的腐蚀速率。Mo通常在锈层中氧化、转化为具有缓蚀作用的钼酸盐，钼酸盐与 $\\mathrm { F e } ^ { 2 + }$ 发生反应生成为 $_ \\mathrm { F e M o O _ { 4 } }$ 的氧化物，抑制试验钢的阳极溶解，增加阳极极化，可以大幅减缓腐蚀的进行[9]。Mn在锈层中以 $\\mathbf { M n O _ { x } }$ 形式存在[10]，可作为 $\\mathrm { F e ( O H ) _ { 6 } }$ 单元的形核点[11]，随着Mn含量的增加，增加形核点的数量，从而形成细小的锈层晶粒，增加锈层的致密性。综上可知，Ni，Mo和Mn在钢中的作用机理不同，Ni主要是形成致密的锈层，并使锈层具有阳离子选择性；Mo作为阳极缓蚀剂提高耐蚀性,在锈层和锈层缺陷处形成不溶性的并阻碍阳极溶解,从而提高耐蚀性；Mn的氧化物可以填充裂纹或孔洞处，使锈层更加致密，从而阻止Cl-向基体的渗透，提高钢的耐蚀性能。"
+    ],
+    "query_type": "metadata_entity"
+  },
+  {
+    "question": "这篇文献主要研究了什么？",
+    "ground_truth": "开发了Q345qENH耐候桥梁钢，并应用于官厅水库耐候桥。",
+    "ground_contexts": [
+      "杨永达 1)，王彦锋1)，狄国标1)，马长文1)，韩承良2) (1.首钢技术研究院，北京 100043，2.首钢京唐钢铁联合有限责任公司，河北唐山)摘 要：采用低碳添加 Nb、Ti微合金元素开发了 Q345qENH耐候桥梁钢，适当添加了 Cu、Ni、Cr 等合金元素及提高P含量保证耐候指标I在6.0-7.0之间，生产的钢板屈服强度均值407MPa，抗拉强度均值535MPa，屈强均值为 0.78，延伸率均值25.5%，-40℃冲击功均值287J，钢板韧脆转变温度在-60℃或更低。耐候桥梁钢 Q345qENH 焊接韧性优良，热影响区最大硬度 253HV10，-40℃热影响区冲击功 144-168J。目前开发的Q345qENH 已在官厅水库耐候桥实现整桥裸装应用，稳定的锈层已经形成并保护钢基体。",
+      "Yongda Yang1)，Yanfeng Wang1)， Guobiao Di1)，Changwen Ma1)，Chengliang Han2)(1.Shougang Group Co.,Ltd. Research Institute of Technology ， Beijing 100043,2.ShougangJingtang United Iron & Steel Co.,Ltd) Adopting chemistry system of low carbon and microalloy elements nobium and titanium , the weather resistant bridge steel Q345qENH has been developed and applied on Guanting reservoir bridge project. Besides the addition of alloy elements copper,nickel and chromium , Phosphorus content should be controlled at a high level so that weather resisance index I can be between 6.0 and 7.0. The average yield strength and tensile strength is 407MPa and 535 MPa respectively, while yield ratio and elongation is 0.78 and 25.5%. The average Charpy impact energy at -40℃ is 287J and tough-brittle transition temperature is equal to or less than -60℃. the weather resistant bridge steel Q345qENH has excellent welding performance, for instance , the biggest hardness of HAZ is 253Hv10,while impact energy of HAZ is between 144 and 168J. the steel grade Q345qENH has been successfully used on Guanting reservoir bridge project and steady rust scale has formed and can protect steel matrix. KEY WORDS:Weathering；Bridge steel；welding",
+      "- 1.采用低碳添加 Nb、Ti 的微合金成分体系生产的 Q345qENH 满足 GBT714-2015 的标准要求和官厅桥技术协议，钢板成分满足奶后指数 $1 \\geq 6 . 0$ 的要求，力学性能满足技术标准，且富余量较大。\n- 2.生产的20mm和50mm耐候桥梁钢Q345qENH的韧脆转变温度分为为低于 $- 6 0 ^ { \\circ } C$ ，低温韧性优良，可满足F级冲击要求。\n- 3.耐候桥梁钢 Q345qENH 焊接韧性优良，热影响区最大硬度 253HV10，满足≤ $3 5 0 \\mathsf { H v } _ { 1 0 }$ 的技术要求， $- 4 0 ^ { \\circ } C$ 焊缝冲击功57-81J，热影响区冲击功144-168J，冲击韧性优良。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "总结一下Q345qENH耐候桥梁钢的主要性能指标。",
+    "ground_truth": "屈服强度均值407MPa，抗拉强度均值535MPa，屈强比0.78，延伸率25.5%，-40℃冲击功均值287J，韧脆转变温度≤-60℃。",
+    "ground_contexts": [
+      "杨永达 1)，王彦锋1)，狄国标1)，马长文1)，韩承良2) (1.首钢技术研究院，北京 100043，2.首钢京唐钢铁联合有限责任公司，河北唐山)摘 要：采用低碳添加 Nb、Ti微合金元素开发了 Q345qENH耐候桥梁钢，适当添加了 Cu、Ni、Cr 等合金元素及提高P含量保证耐候指标I在6.0-7.0之间，生产的钢板屈服强度均值407MPa，抗拉强度均值535MPa，屈强均值为 0.78，延伸率均值25.5%，-40℃冲击功均值287J，钢板韧脆转变温度在-60℃或更低。耐候桥梁钢 Q345qENH 焊接韧性优良，热影响区最大硬度 253HV10，-40℃热影响区冲击功 144-168J。目前开发的Q345qENH 已在官厅水库耐候桥实现整桥裸装应用，稳定的锈层已经形成并保护钢基体。",
+      "[Section] 3 性能和组织\n[Caption] 表 4 Q345qENH 耐候钢性能统计 Table4 Performance statistics of weathering steel Q345qENH\n[Table HTML]\n<table><tr><td></td><td>Rel/MPa</td><td>Rm/MPa</td><td>Rel/Rm</td><td>A%</td><td>-40°C Akv/J</td></tr><tr><td>min</td><td>380</td><td>502</td><td>0.73</td><td>22</td><td>208</td></tr><tr><td>max</td><td>467</td><td>576</td><td>0.83</td><td>29</td><td>366</td></tr><tr><td>ave</td><td>407</td><td>535</td><td>0.78</td><td>25.5</td><td>287</td></tr><tr><td>requirement</td><td>≥345</td><td>≥490</td><td>≤0.85</td><td>≥18</td><td>≥120</td></tr></table>",
+      "- 1.采用低碳添加 Nb、Ti 的微合金成分体系生产的 Q345qENH 满足 GBT714-2015 的标准要求和官厅桥技术协议，钢板成分满足奶后指数 $1 \\geq 6 . 0$ 的要求，力学性能满足技术标准，且富余量较大。\n- 2.生产的20mm和50mm耐候桥梁钢Q345qENH的韧脆转变温度分为为低于 $- 6 0 ^ { \\circ } C$ ，低温韧性优良，可满足F级冲击要求。\n- 3.耐候桥梁钢 Q345qENH 焊接韧性优良，热影响区最大硬度 253HV10，满足≤ $3 5 0 \\mathsf { H v } _ { 1 0 }$ 的技术要求， $- 4 0 ^ { \\circ } C$ 焊缝冲击功57-81J，热影响区冲击功144-168J，冲击韧性优良。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "Q345qENH耐候桥梁钢的耐候指数I要求是多少？",
+    "ground_truth": "6.0-7.0。",
+    "ground_contexts": [
+      "杨永达 1)，王彦锋1)，狄国标1)，马长文1)，韩承良2) (1.首钢技术研究院，北京 100043，2.首钢京唐钢铁联合有限责任公司，河北唐山)摘 要：采用低碳添加 Nb、Ti微合金元素开发了 Q345qENH耐候桥梁钢，适当添加了 Cu、Ni、Cr 等合金元素及提高P含量保证耐候指标I在6.0-7.0之间，生产的钢板屈服强度均值407MPa，抗拉强度均值535MPa，屈强均值为 0.78，延伸率均值25.5%，-40℃冲击功均值287J，钢板韧脆转变温度在-60℃或更低。耐候桥梁钢 Q345qENH 焊接韧性优良，热影响区最大硬度 253HV10，-40℃热影响区冲击功 144-168J。目前开发的Q345qENH 已在官厅水库耐候桥实现整桥裸装应用，稳定的锈层已经形成并保护钢基体。",
+      "[Section] 2 技术要求和工艺\n[Caption] 表 3 官厅桥 Q345qENH 的设计成分 Table3 Composition design of Q345qENH or Guanting bridge\n[Table HTML]\n<table><tr><td>C</td><td>Si</td><td>Mn</td><td>P</td><td>S</td><td>Cu+Ni+Cr</td><td>Nb+Ti</td><td>Pcm</td><td>I</td></tr><tr><td> $\\leqslant 0.1$ </td><td>0.15-0.5</td><td>1-1.5</td><td> $\\leqslant 0.02$ </td><td> $\\leqslant 0.005$ </td><td> $\\leqslant 1.5$ </td><td> $\\leqslant 0.08$ </td><td> $\\leqslant 0.2$ </td><td>6.0-7.0</td></tr></table>",
+      "如表1所示，因为当前GBT714-2015标准中对耐候桥梁钢的具体碳当量、Pcm和耐候指数均没有给出详细的技术要求，为此在满足GBT714-2015的前提下，对于官厅桥用Q345qENH制定如下技术要求，Pcm要求≤0.20，耐候指数I≥6.0，同时对碳含量和Cu、Ni、Cr等合金元素含量作出了严格的规定。如表2所示，钢板力学指标满足GBT714-2015规定，要求-40℃冲击功≥120J，该指标大幅高于国外同类产品要求。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "为什么要在Q345qENH中添加Cu、Ni、Cr等合金元素？",
+    "ground_truth": "为了保证耐候指数I>6.0。",
+    "ground_contexts": [
+      "杨永达 1)，王彦锋1)，狄国标1)，马长文1)，韩承良2) (1.首钢技术研究院，北京 100043，2.首钢京唐钢铁联合有限责任公司，河北唐山)摘 要：采用低碳添加 Nb、Ti微合金元素开发了 Q345qENH耐候桥梁钢，适当添加了 Cu、Ni、Cr 等合金元素及提高P含量保证耐候指标I在6.0-7.0之间，生产的钢板屈服强度均值407MPa，抗拉强度均值535MPa，屈强均值为 0.78，延伸率均值25.5%，-40℃冲击功均值287J，钢板韧脆转变温度在-60℃或更低。耐候桥梁钢 Q345qENH 焊接韧性优良，热影响区最大硬度 253HV10，-40℃热影响区冲击功 144-168J。目前开发的Q345qENH 已在官厅水库耐候桥实现整桥裸装应用，稳定的锈层已经形成并保护钢基体。",
+      "根据技术要求，设计了低碳添加Nb、Ti的微合金成分体系，为了保证耐候指数I＞6.0，添加了Cu、Ni、Cr等合金元素，并适当提高P的控制范围，为了保证焊接性，Pcm控制≤0.22,具体见表3所示。钢板生产工艺采用TMCP工艺，对厚度20mm以上钢板进行回火热处理。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "Q345qENH钢板在室温下焊接时，热影响区最高硬度是多少？",
+    "ground_truth": "253 HV10。",
+    "ground_contexts": [
+      "最大硬度试验结果见表5所示，Q345qENH钢板在室温下焊接，焊接热影响区最高硬度为253 HV10，预热50℃下焊接，焊接热影响区最高硬度为249 HV10。Q345qENH钢板的焊缝硬度较小，完全满足≤350HV10的要求。",
+      "[Section] 3 性能和组织\n[Caption] 表5 最高硬度试验结果 Table5 Test result of maximum hardness\n[Table HTML]\n<table><tr><td>Steel</td><td>Thickness/mm</td><td>Preheating Temperature</td><td>Hardness value/HV10</td></tr><tr><td>Q345qENH</td><td>40</td><td>室温</td><td>203, 197, 213, 233, 240, 253, 250, 248, 243, 233, 228, 210, 208, 199, 194, 197</td></tr><tr><td>Q345qENH</td><td>40</td><td>50°C</td><td>198, 194, 203, 199, 210, 225, 220, 238, 243, 249, 239, 230, 221, 201, 199, 201</td></tr></table>"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "Q345qENH的韧脆转变温度是多少？",
+    "ground_truth": "20mm钢板为-80℃，50mm钢板厚度1/4处和心部为-60℃。",
+    "ground_contexts": [
+      "对20mm及50mmQ345qENH钢进行系列冲击，试验温度为-20℃、-40℃、-60℃、-80℃和 ${ \\bf - 1 0 0 ^ { \\circ } C }$ 。20mm钢板韧脆转变温度为 $- 8 0 ^ { \\circ } \\mathrm { C }$ 。50mm钢厚度1/4处和心部韧脆转变在 ${ \\displaystyle { \\it - 6 0 } ^ { \\circ } C }$ ，韧脆转变温度曲线如图1所示。",
+      "- 1.采用低碳添加 Nb、Ti 的微合金成分体系生产的 Q345qENH 满足 GBT714-2015 的标准要求和官厅桥技术协议，钢板成分满足奶后指数 $1 \\geq 6 . 0$ 的要求，力学性能满足技术标准，且富余量较大。\n- 2.生产的20mm和50mm耐候桥梁钢Q345qENH的韧脆转变温度分为为低于 $- 6 0 ^ { \\circ } C$ ，低温韧性优良，可满足F级冲击要求。\n- 3.耐候桥梁钢 Q345qENH 焊接韧性优良，热影响区最大硬度 253HV10，满足≤ $3 5 0 \\mathsf { H v } _ { 1 0 }$ 的技术要求， $- 4 0 ^ { \\circ } C$ 焊缝冲击功57-81J，热影响区冲击功144-168J，冲击韧性优良。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "《Q345qENH耐候桥梁钢的研发及应用》这篇文献中，Q345qENH的化学成分设计有什么特点？",
+    "ground_truth": "采用低碳添加Nb、Ti微合金元素，添加Cu、Ni、Cr，提高P含量，Pcm≤0.2，耐候指数I在6.0-7.0。",
+    "ground_contexts": [
+      "杨永达 1)，王彦锋1)，狄国标1)，马长文1)，韩承良2) (1.首钢技术研究院，北京 100043，2.首钢京唐钢铁联合有限责任公司，河北唐山)摘 要：采用低碳添加 Nb、Ti微合金元素开发了 Q345qENH耐候桥梁钢，适当添加了 Cu、Ni、Cr 等合金元素及提高P含量保证耐候指标I在6.0-7.0之间，生产的钢板屈服强度均值407MPa，抗拉强度均值535MPa，屈强均值为 0.78，延伸率均值25.5%，-40℃冲击功均值287J，钢板韧脆转变温度在-60℃或更低。耐候桥梁钢 Q345qENH 焊接韧性优良，热影响区最大硬度 253HV10，-40℃热影响区冲击功 144-168J。目前开发的Q345qENH 已在官厅水库耐候桥实现整桥裸装应用，稳定的锈层已经形成并保护钢基体。",
+      "[Section] 2 技术要求和工艺\n[Caption] 表 3 官厅桥 Q345qENH 的设计成分 Table3 Composition design of Q345qENH or Guanting bridge\n[Table HTML]\n<table><tr><td>C</td><td>Si</td><td>Mn</td><td>P</td><td>S</td><td>Cu+Ni+Cr</td><td>Nb+Ti</td><td>Pcm</td><td>I</td></tr><tr><td> $\\leqslant 0.1$ </td><td>0.15-0.5</td><td>1-1.5</td><td> $\\leqslant 0.02$ </td><td> $\\leqslant 0.005$ </td><td> $\\leqslant 1.5$ </td><td> $\\leqslant 0.08$ </td><td> $\\leqslant 0.2$ </td><td>6.0-7.0</td></tr></table>",
+      "根据技术要求，设计了低碳添加Nb、Ti的微合金成分体系，为了保证耐候指数I＞6.0，添加了Cu、Ni、Cr等合金元素，并适当提高P的控制范围，为了保证焊接性，Pcm控制≤0.22,具体见表3所示。钢板生产工艺采用TMCP工艺，对厚度20mm以上钢板进行回火热处理。"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "这篇论文中提到的焊接试验结果如何？",
+    "ground_truth": "焊接热影响区最大硬度253HV10（室温），249HV10（预热50℃）；焊接接头抗拉强度551MPa，-40℃冲击功焊缝区70J，热影响区156J。",
+    "ground_contexts": [
+      "最大硬度试验结果见表5所示，Q345qENH钢板在室温下焊接，焊接热影响区最高硬度为253 HV10，预热50℃下焊接，焊接热影响区最高硬度为249 HV10。Q345qENH钢板的焊缝硬度较小，完全满足≤350HV10的要求。",
+      "[Section] 3 性能和组织\n[Caption] 表 6 Q345qENH 焊接后接头力学性能 Table6 Mechanical properties of welded joints of steel Q345qENH\n[Table HTML]\n<table><tr><td>钢种</td><td>Rm/MPa</td><td colspan=\"2\">-40°C冲击功/J</td></tr><tr><td></td><td></td><td>焊缝区</td><td>热影响区</td></tr><tr><td rowspan=\"2\">Q345qENH</td><td rowspan=\"2\">551</td><td>81, 57, 73</td><td>144, 168, 155</td></tr><tr><td>70</td><td>156</td></tr><tr><td>标准要求</td><td>≥490</td><td colspan=\"2\">≥47</td></tr></table>",
+      "- 1.采用低碳添加 Nb、Ti 的微合金成分体系生产的 Q345qENH 满足 GBT714-2015 的标准要求和官厅桥技术协议，钢板成分满足奶后指数 $1 \\geq 6 . 0$ 的要求，力学性能满足技术标准，且富余量较大。\n- 2.生产的20mm和50mm耐候桥梁钢Q345qENH的韧脆转变温度分为为低于 $- 6 0 ^ { \\circ } C$ ，低温韧性优良，可满足F级冲击要求。\n- 3.耐候桥梁钢 Q345qENH 焊接韧性优良，热影响区最大硬度 253HV10，满足≤ $3 5 0 \\mathsf { H v } _ { 1 0 }$ 的技术要求， $- 4 0 ^ { \\circ } C$ 焊缝冲击功57-81J，热影响区冲击功144-168J，冲击韧性优良。"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "图2说明了什么？",
+    "ground_truth": "图2是Q345qENH钢板的金相组织，显示厚度1/4处和心部的组织为多边形铁素体、针状铁素体和细小的珠光体。",
+    "ground_contexts": [
+      "[Section] 3 性能和组织\n[图片说明] 图 2 Q345qENH 钢板的金相组织(a)厚度 1/4 处,(b)心部 Fig2 Microstructure of steel Q345qENH（a）1/4 of thickness,(b)1/2 of thickness",
+      "50mm钢板金相组织分别如图2所示，厚度1/4处和心部的组织均匀，组织为多边形铁素体、针状铁素体和细小的珠光体，50mm钢板的心部多边形铁素体含量高于1/4处的多边形铁素体含量，且心部的珠光体尺寸高于厚度1/4处的珠光体尺寸。"
+    ],
+    "query_type": "metadata_fig"
+  },
+  {
+    "question": "正文中哪里提到了耐候指数I的计算公式？",
+    "ground_truth": "在表1的注1中给出了计算公式：I=26.01(%Cu)+3.88(%Ni)+1.20(%Cr)+1.49(%Si)+17.28(%P)-7.29(%Cu)(%Ni)-9.10(%Ni)(%P)-33.39(%Cu)^2≥6.0。",
+    "ground_contexts": [
+      "[Section] 2 技术要求和工艺\n\n注1：耐大气腐蚀指数I=26.01（%Cu）+3.88（%Ni）+1.20（%Cr）+1.49（%Si）+17.28（%P） -7.29（%Cu）（%Ni）-9.10（%Ni）（%P）-33.39（%Cu）2≥6.0 注2：钢中残余元素控制 [N]≤0.0080%，[B]≤0.0005%。\n[Caption] 表 1 官厅桥 Q345qENH 成分要求 Table1 Composition requirements of Q345qENH for Guanting bdidge\n[Table HTML]\n<table><tr><td>C</td><td>Si</td><td>Mn</td><td>P</td><td>S</td><td>Cu</td><td>Ni</td><td>Cr</td><td>Nb</td><td>Ti</td><td>Als</td></tr><tr><td> $\\leqslant 0.1$ </td><td>0.15-0.5</td><td>1-1.5</td><td> $\\leqslant 0.02$ </td><td> $\\leqslant 0.005$ </td><td>0.25-0.5</td><td>0.3-0.4</td><td>0.4-0.7</td><td> $\\leqslant 0.06$ </td><td> $\\leqslant 0.03$ </td><td> $\\geqslant 0.015$ </td></tr></table>"
+    ],
+    "query_type": "metadata_entity"
+  },
+  {
+    "question": "总结一下这篇文献的主要内容",
+    "ground_truth": "通过优化Q355NHB耐候H型钢的工艺参数，主要从转炉冶炼、LF精炼和连铸三方面入手，对耐候钢的生产工艺进行探讨与研究，为生产耐候钢提供参考。",
+    "ground_contexts": [
+      "李宁，周剑波，孟义春，燕建宏首钢长治钢铁有限公司炼钢厂摘 要：通过优化 Q355NHB 耐候 H 型钢的工艺参数，主要从转炉冶炼、LF 精炼和连铸三方面入手，对耐候钢的生产工艺进行探讨与研究，为生产耐候钢提供参考。",
+      "Abstract: Optimization of technological parameters of the weathering steel in H-beam Q355NHB, from the three aspects of converter smelting, LF refining and continuous casting, which provides reference for the production of weathering steel."
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "文献中提到了哪几种钢种的生产实践？",
+    "ground_truth": "文献提到了Q355NHB耐候H型钢、ER70S-6焊接用盘条以及超宽特厚集装箱船用止裂钢的冶炼生产工艺实践。",
+    "ground_contexts": [
+      "李宁，周剑波，孟义春，燕建宏首钢长治钢铁有限公司炼钢厂摘 要：通过优化 Q355NHB 耐候 H 型钢的工艺参数，主要从转炉冶炼、LF 精炼和连铸三方面入手，对耐候钢的生产工艺进行探讨与研究，为生产耐候钢提供参考。",
+      "孟义春，周剑波，李宁，燕建宏，李国军首钢长治钢铁有限公司炼钢厂，山西长治，046031摘 要：采用氧气顶吹转炉冶炼、LF 精炼处理及小方坯连铸机成功生产了焊接用钢盘条 ER70S-6。通过采取窄成分控制、精炼处理、全程保护浇注等工艺措施，使盘条的化学成分稳定、强度低、塑性高，拉拔性能和焊接性能优良。",
+      "肖青松，丛津功，王若钢，李新玲，刘源，应传涛鞍钢股份有限公司鲅鱼圈钢铁分公司，辽宁 营口 115007摘 要：基于多相组织调控原理获得高止裂性钢板，通过实施高洁净化与高均质冶金技术、低温加热原始奥氏体晶粒细化、临界温度区间大厚度截面钢板奥氏体超细化再结晶控制及驰豫过程中先共析铁素体析出形态与比例等全流程控制关键技术，获得了具有合适软硬相配比、晶粒细化的多相组织。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "Q355NHB耐候H型钢的冶炼工艺主要从哪几个方面入手？",
+    "ground_truth": "主要从转炉冶炼、LF精炼和连铸三方面入手。",
+    "ground_contexts": [
+      "李宁，周剑波，孟义春，燕建宏首钢长治钢铁有限公司炼钢厂摘 要：通过优化 Q355NHB 耐候 H 型钢的工艺参数，主要从转炉冶炼、LF 精炼和连铸三方面入手，对耐候钢的生产工艺进行探讨与研究，为生产耐候钢提供参考。",
+      "关键词：耐候钢；转炉冶炼；LF 精炼；连铸"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "ER70S-6焊接用盘条采用了哪些工艺措施？",
+    "ground_truth": "采用氧气顶吹转炉冶炼、LF精炼处理及小方坯连铸机，以及窄成分控制、精炼处理、全程保护浇注等工艺措施。",
+    "ground_contexts": [
+      "孟义春，周剑波，李宁，燕建宏，李国军首钢长治钢铁有限公司炼钢厂，山西长治，046031摘 要：采用氧气顶吹转炉冶炼、LF 精炼处理及小方坯连铸机成功生产了焊接用钢盘条 ER70S-6。通过采取窄成分控制、精炼处理、全程保护浇注等工艺措施，使盘条的化学成分稳定、强度低、塑性高，拉拔性能和焊接性能优良。",
+      "Abstract: ER70S-6 wire rod for welding are successful produced by following methods: iron is smelt in top blowing oxygen BOF, LF refining process and then continuously cast into small billets. Taking such measures as narrow chemical compositions controlling, refine treating, protective casting, and so on. The chemical compositions of the rod are uniform, the tensile strength is low, the plasticity is high, drawing and welding properties are fine."
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "Q355NHB耐候H型钢与ER70S-6焊接用盘条在冶炼工艺上有哪些共同点？",
+    "ground_truth": "两者都采用了转炉冶炼、LF精炼和连铸工艺。",
+    "ground_contexts": [
+      "李宁，周剑波，孟义春，燕建宏首钢长治钢铁有限公司炼钢厂摘 要：通过优化 Q355NHB 耐候 H 型钢的工艺参数，主要从转炉冶炼、LF 精炼和连铸三方面入手，对耐候钢的生产工艺进行探讨与研究，为生产耐候钢提供参考。",
+      "孟义春，周剑波，李宁，燕建宏，李国军首钢长治钢铁有限公司炼钢厂，山西长治，046031摘 要：采用氧气顶吹转炉冶炼、LF 精炼处理及小方坯连铸机成功生产了焊接用钢盘条 ER70S-6。通过采取窄成分控制、精炼处理、全程保护浇注等工艺措施，使盘条的化学成分稳定、强度低、塑性高，拉拔性能和焊接性能优良。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "分析夹杂物对连铸过程的影响，有什么研究结论？",
+    "ground_truth": "RH深脱碳后氧含量过高，虽能提高脱碳效果，但造成后续脱氧负担加重；中间包非稳态时期开浇液面波动大、易卷渣，存在严重二次氧化，导致头坯氧氮含量过高。",
+    "ground_contexts": [
+      "分析夹杂物对连铸过程的影响，并提出了建议，为去除夹杂物，提高钢液洁净度提供了依据。研究表明，RH 深脱碳后氧含量过高，尽管能提高钢水脱碳效果，但是造成后续脱氧负担加重；中间包非稳态时期开浇液面波动大、易卷渣，开浇过程存在着严重的二次氧化，造成头坯氧氮含量过高，影响铸坯质量。",
+      "Abstract: This paper studies the RH special steel refining and continuous casting tundish inclusions and continuous casting mold in the process of source analysis on influence of inclusion in continuous casting process, and puts forward some suggestions, for the removal of inclusions, provide basis for improving the cleanliness of liquid steel. Research shows that after RH deep decarbonization high oxygen content, although can improve the liquid steel decarburization effect, but subsequent deoxidation burden of tundish; non steady casting period, volume level fluctuation of slag casting process there are two serious oxidation, causing head slab oxygen nitrogen content is too high, affect the quality of casting billet."
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "《Q355NHB耐候H型钢冶炼实践》这篇文献中，提到了哪些工艺环节？",
+    "ground_truth": "提到了转炉冶炼、LF精炼和连铸三个工艺环节。",
+    "ground_contexts": [
+      "李宁，周剑波，孟义春，燕建宏首钢长治钢铁有限公司炼钢厂摘 要：通过优化 Q355NHB 耐候 H 型钢的工艺参数，主要从转炉冶炼、LF 精炼和连铸三方面入手，对耐候钢的生产工艺进行探讨与研究，为生产耐候钢提供参考。",
+      "关键词：耐候钢；转炉冶炼；LF 精炼；连铸"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "上面那篇关于ER70S-6的文献，作者来自什么单位？",
+    "ground_truth": "首钢长治钢铁有限公司炼钢厂。",
+    "ground_contexts": [
+      "孟义春，周剑波，李宁，燕建宏，李国军首钢长治钢铁有限公司炼钢厂，山西长治，046031摘 要：采用氧气顶吹转炉冶炼、LF 精炼处理及小方坯连铸机成功生产了焊接用钢盘条 ER70S-6。通过采取窄成分控制、精炼处理、全程保护浇注等工艺措施，使盘条的化学成分稳定、强度低、塑性高，拉拔性能和焊接性能优良。",
+      "The Steelworks of ShouGang ChangZhi Iron & Steel Co., Ltd, ChangZhi City of ShanXi Province, 046031"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "正文里包含“耐候钢”这个关键词的段落有哪些？",
+    "ground_truth": "出现在中文摘要（text_d6cc432d）和关键词（text_7a81a392）中。",
+    "ground_contexts": [
+      "李宁，周剑波，孟义春，燕建宏首钢长治钢铁有限公司炼钢厂摘 要：通过优化 Q355NHB 耐候 H 型钢的工艺参数，主要从转炉冶炼、LF 精炼和连铸三方面入手，对耐候钢的生产工艺进行探讨与研究，为生产耐候钢提供参考。",
+      "关键词：耐候钢；转炉冶炼；LF 精炼；连铸"
+    ],
+    "query_type": "metadata_entity"
+  },
+  {
+    "question": "正文里包含“连铸”这个术语的段落有哪些？",
+    "ground_truth": "出现在分析夹杂物影响连铸的段落（text_70227f72）、Q355NHB摘要（text_d6cc432d）、Q355NHB关键词（text_7a81a392）以及ER70S-6摘要（text_31a1d711）中。",
+    "ground_contexts": [
+      "分析夹杂物对连铸过程的影响，并提出了建议，为去除夹杂物，提高钢液洁净度提供了依据。研究表明，RH 深脱碳后氧含量过高，尽管能提高钢水脱碳效果，但是造成后续脱氧负担加重；中间包非稳态时期开浇液面波动大、易卷渣，开浇过程存在着严重的二次氧化，造成头坯氧氮含量过高，影响铸坯质量。",
+      "李宁，周剑波，孟义春，燕建宏首钢长治钢铁有限公司炼钢厂摘 要：通过优化 Q355NHB 耐候 H 型钢的工艺参数，主要从转炉冶炼、LF 精炼和连铸三方面入手，对耐候钢的生产工艺进行探讨与研究，为生产耐候钢提供参考。",
+      "孟义春，周剑波，李宁，燕建宏，李国军首钢长治钢铁有限公司炼钢厂，山西长治，046031摘 要：采用氧气顶吹转炉冶炼、LF 精炼处理及小方坯连铸机成功生产了焊接用钢盘条 ER70S-6。通过采取窄成分控制、精炼处理、全程保护浇注等工艺措施，使盘条的化学成分稳定、强度低、塑性高，拉拔性能和焊接性能优良。"
+    ],
+    "query_type": "metadata_entity"
+  },
+  {
+    "question": "总结一下这篇文献的主要内容。",
+    "ground_truth": "本文以高速动车转向架构架用耐候钢S355J2W为研究对象，通过炉内加热模拟火焰矫正工艺，在800℃、750℃、700℃、650℃四种温度下进行实验，分析微观组织和力学性能。结果表明700℃时力学性能最优，硬度值和拉伸性能下降最小，冲击性能远高于最低要求，微观组织为铁素体、团絮状珠光体和少量残余奥氏体，晶粒细化。",
+    "ground_contexts": [
+      "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   **Role:** Rigorous scientific literature editor.\n    *   **Task:** Generate a search abstract (summary) based on the provided first page text of a literature.\n    *   **Constraints:**\n        *   Length: 3-5 sentences.\n        *   Word count: 200-400 Chinese characters.\n        *   Content: Use only facts appearing in the fragment, no fabrication.\n        *   Format: Direct output of the abstract text only, no title, no markdown fences.\n\n2.  **Analyze the Input Text:**\n    *   **Title/Authors:** Liu Xue, Jilin Vocational College of Industry and Technology.\n    *   **Abstract (English):** Research object: S355J2W weathering resistant steel for high dynamic car bogie frame. Method: Heating furnace simulate fire heating experiment at different temperatures, metallographic microscope and SEM for microstructure, tensile, bending, impact, micro-hardness for mechanical performance. Results: 700°C simulation temperature gives best mechanical properties (minimal decline in hardness/tensile, impact far higher than minimum). Microstructure: ferrite, floe pearlite, retained austenite, refined grains.\n    *   **Abstract (Chinese):** Matches the English abstract.\n    *   **Introduction:** Bogie frames bear complex dynamic loads. Need strength, fatigue, corrosion resistance, low-temperature resistance (-40°C). S355J2W is EN10025-5-2004 weathering structural steel, used in 380 km/h trains, etc. Flame correction (oxy-acetylene) is important for deformation. This paper simulates flame heating at 4 temperatures to find optimal flame correction temperature.\n    *   **Materials/Methods:** Material: 12mm thick S355J2W. Temperatures: 800°C, 750°C, 700°C, 650°C. Heating: 10 min hold, air cool.\n    *   **Results (Partial):** 800°C (W1) yield strength significantly reduced. 700°C (W3) largest elongation, yield strength close to unheated W0.\n\n3.  **Drafting the Abstract (Iterative Process):**\n\n    *   *Attempt 1 (Mental Outline):*\n        本文以高速动车转向架构架用耐候钢 S355J2W 为研究对象，采用炉内加热模拟火焰矫正工艺。实验设置了 800℃、750℃、700℃、650℃四种温度，保温 10 分钟后空冷。通过拉伸、冲击等力学性能测试及",
+      "- （1）热模拟炉温控制在 700℃时，S355J2W 有最优的力学性能，硬度值和拉伸性能较母材下降幅度最小，弯曲性能完全复合要求，冲击性能远高于此耐候钢钢材本身要求的最低冲击值。\n- （2）热模拟炉温控制在 700℃时，模拟加热区微观组织主要为铁素体、团絮状的珠光体和少量的残余奥氏体，晶粒有所细化，晶界出有明显呈弥散分布的粒状组织，晶界清晰。",
+      "用于高速列车转向架构架是复杂动负荷的主要承载构件，该动负荷又随速度的提高而明显增强。因此，要求该焊接构架有足够的强度和疲劳性能，以便减轻自重，实现低动力作用和确保运行安全可靠。由于我国铁路运行环境要经受南方大气腐蚀和北方的低温环境（-40℃）的考验，因此构架材质需要有抗腐蚀和耐低温的性能。S355J2W 钢根据使用标准 EN10025-5-2004，属于耐候结构钢，广泛用于铁路客车转向架构架结构。国内长春轨道客车厂在制造时速380 km/h动车组、香港地铁和北京地铁十五号线转向架焊接构架时即采用了这种钢材[1-4]。由于构架在加工和焊接过程中不可避免会发生变形，沿用机械矫正变形的方法费时费力，而且不能保证质量。采用火焰（氧—乙炔）矫正金属变形法, 在国内外生产中早已显示出不可忽视的重要性。本文通过在 4 种温度控制下炉内加热模拟火焰加热来对 S355J2W耐候钢进行微观组织和力学性能分析，探讨最适合的火焰矫正温度，用于指导工厂加工实践。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "这篇论文的核心贡献是什么？",
+    "ground_truth": "通过模拟火焰矫正实验，确定了S355J2W耐候钢的最佳火焰矫正温度为700℃，在该温度下材料力学性能下降最小，微观组织得到细化，为工厂实际火焰矫正工艺提供了温度参数指导。",
+    "ground_contexts": [
+      "- （1）热模拟炉温控制在 700℃时，S355J2W 有最优的力学性能，硬度值和拉伸性能较母材下降幅度最小，弯曲性能完全复合要求，冲击性能远高于此耐候钢钢材本身要求的最低冲击值。\n- （2）热模拟炉温控制在 700℃时，模拟加热区微观组织主要为铁素体、团絮状的珠光体和少量的残余奥氏体，晶粒有所细化，晶界出有明显呈弥散分布的粒状组织，晶界清晰。",
+      "用于高速列车转向架构架是复杂动负荷的主要承载构件，该动负荷又随速度的提高而明显增强。因此，要求该焊接构架有足够的强度和疲劳性能，以便减轻自重，实现低动力作用和确保运行安全可靠。由于我国铁路运行环境要经受南方大气腐蚀和北方的低温环境（-40℃）的考验，因此构架材质需要有抗腐蚀和耐低温的性能。S355J2W 钢根据使用标准 EN10025-5-2004，属于耐候结构钢，广泛用于铁路客车转向架构架结构。国内长春轨道客车厂在制造时速380 km/h动车组、香港地铁和北京地铁十五号线转向架焊接构架时即采用了这种钢材[1-4]。由于构架在加工和焊接过程中不可避免会发生变形，沿用机械矫正变形的方法费时费力，而且不能保证质量。采用火焰（氧—乙炔）矫正金属变形法, 在国内外生产中早已显示出不可忽视的重要性。本文通过在 4 种温度控制下炉内加热模拟火焰加热来对 S355J2W耐候钢进行微观组织和力学性能分析，探讨最适合的火焰矫正温度，用于指导工厂加工实践。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "S355J2W耐候钢在700℃加热后的微观组织是什么？",
+    "ground_truth": "微观组织主要为铁素体、团絮状的珠光体和少量的残余奥氏体，晶粒有所细化，晶界处有明显呈弥散分布的粒状组织，晶界清晰。",
+    "ground_contexts": [
+      "Abstract：In high dynamic car bogie frame S355J2W weathering resistant steel as the research object, heating furnace simulate fire heating experiment conducted at different temperature to analysis microstructure by metallographic microscope and scanning electron microscopy, through the tensile, bending, impact, micro-hardness experiment to carry out mechanical performance research. The results show that: simulation temperature control in 700 ℃, S355J2W has the best mechanical properties, hardness value and the tensile performance is minimal decline than the mother material , impact performance is far higher than the minimum impact of the weathering resistant steel. The microstructure of the simulation heating areas is mainly for the ferrite, group of the floe pearlite and a small amount of retained austenite, and all the grains have been refined.",
+      "图 2 分别是各个试样在扫描电镜下放大 2000 倍的显微组织，从图中可以看成组织的主要成分仍然是铁素体和珠光体。图 2（a）中，珠光体的成分明显减少，且组织内部已经破碎，被部分残余奥氏体填充。图 2（b）中，珠光体的成分仍然不多，但组织相对紧实，且内部没有明显的残余奥氏体的存在，晶界清晰，铁素体组织的成分仍然占较大比重。从中图 2（c）可以见到大块紧实的珠光体组织，且内部没有参杂其他的成分，晶粒也有所细化，晶界出有明显呈弥散分布的粒状组织，晶界清晰。图 2（d）中粒状分别的弥散组织不再明显。",
+      "- （1）热模拟炉温控制在 700℃时，S355J2W 有最优的力学性能，硬度值和拉伸性能较母材下降幅度最小，弯曲性能完全复合要求，冲击性能远高于此耐候钢钢材本身要求的最低冲击值。\n- （2）热模拟炉温控制在 700℃时，模拟加热区微观组织主要为铁素体、团絮状的珠光体和少量的残余奥氏体，晶粒有所细化，晶界出有明显呈弥散分布的粒状组织，晶界清晰。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "为什么火焰矫正温度不能过高也不能过低？",
+    "ground_truth": "温度过高（如800℃）会导致材料明显软化，硬度下降幅度达43%，屈服强度显著降低；温度过低（如650℃）硬度下降幅度反而比700℃大（20% vs 10%），因此需要控制在合适温度范围内，700℃时硬度下降最小（10%），综合性能最优。",
+    "ground_contexts": [
+      "显微硬度试验按照 BS EN ISO6507-1:2005 金属材料硬度试验方法进行，在每个试样不同位置进行显微硬度测量取平均值，各试样的显微硬度值见表 4。有试验结果我们可以看成相比较于 W0，其它试样的硬度值不同程度上已经下降。W1 的硬度下降幅度最大，达到 43%，W2 的硬度下降幅度次之为30%，W3 的下降幅度为 10%，W4 的下降幅度为 20%。这说明在模拟火焰矫正过程中温度过高已经导致材料明显的软化，因此在火焰矫正过程中必须严格控制加热温度，避免因温度过高导致材料的软化。但并不是说加热温度越低越好，在 W3 和 W4 的硬度数据中可以看成，W4 的硬度比 W3 低，W3 的硬度下降幅度较小，与 W0 比较接近，因此加热温度应该控制在一定的温度范围内不能过高也不能过低。",
+      "由试验结果比较我们可以看出 W1经过 800℃加热后的屈服强度已经明显降低，且远低于母材。抗拉强度虽然处于S355J2W所要求的区间，但其强度值也明显低于 S355J2W，其它加热试件与未加热的材质比较在拉伸性能方面无明显差别。延伸率都略高于未加热的S355J2W。W3 经过 700℃加热后有最大的延伸率，其屈服强度也与未加热的W0接近，表现出较好的综合拉伸性能。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "经过800℃加热后，屈服强度有什么变化？",
+    "ground_truth": "经过800℃加热的W1试件屈服强度明显降低，为321 MPa，远低于母材W0的426 MPa，且低于S355J2W标准要求的355 MPa。",
+    "ground_contexts": [
+      "由试验结果比较我们可以看出 W1经过 800℃加热后的屈服强度已经明显降低，且远低于母材。抗拉强度虽然处于S355J2W所要求的区间，但其强度值也明显低于 S355J2W，其它加热试件与未加热的材质比较在拉伸性能方面无明显差别。延伸率都略高于未加热的S355J2W。W3 经过 700℃加热后有最大的延伸率，其屈服强度也与未加热的W0接近，表现出较好的综合拉伸性能。",
+      "[Section] 拉伸性能详见表 3。\n[Table without caption]\n[Table HTML]\n<table><tr><td>试件</td><td>屈服强度(MPa)</td><td>抗拉强度(MPa)</td><td>延伸率(%)</td></tr><tr><td>W 0</td><td>426</td><td>564</td><td>24.5</td></tr><tr><td>W 1</td><td>321</td><td>518</td><td>26.5</td></tr><tr><td>W 2</td><td>420</td><td>527</td><td>27.5</td></tr><tr><td>W 3</td><td>422</td><td>534</td><td>28.0</td></tr><tr><td>W 4</td><td>440</td><td>551</td><td>27.0</td></tr></table>"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "在-40℃时，哪个试样的冲击功最高？",
+    "ground_truth": "在-40℃时，W3（700℃加热）的冲击功最高，达到199.3 J，远高于其他三组试样（W1为67 J，W2为74 J，W4为84 J），也远高于材料本身要求的最低冲击值27 J。",
+    "ground_contexts": [
+      "冲击试验按照 EN 10 045-1: 1990 E金属材料冲击试验方法进行，试样开“V”型破口后在冲击试验机上进行，每种加热规范的试样分别在 -40℃、-20℃、0℃、20℃下进行，各试验温度下分别取三个试样，试验结果取平均值。试验结果见表 5。由数据我们可以看出在-40℃时 W3 的冲击功达到 199.3J，远远高于其他三组试样的冲击功，这说明经过 700℃加热处理后的试样表现出优异的低温冲击性能，也远远高于材料本身所要求的最低冲击值。其他三组试样的冲击值虽然也较材料本身要求的冲击值高，但相对于试样 W3 也相差较大。在-20℃时，各组的冲击功相对较高，除W2 的冲击值较低外，其他三组比较接近。在 0℃和 20℃时，各组的冲击功都很高且比较接近。综合以上，我们可以得出：W3 在低温时有最高的冲击数值，在",
+      "[Section] 2.显微硬度试验\n[Caption] 表 5 Table 3\n[Table HTML]\n<table><tr><td rowspan=\"2\">试样</td><td colspan=\"4\">冲击功 / AKv-J</td></tr><tr><td>-40°C</td><td>-20°C</td><td>0°C</td><td>20°C</td></tr><tr><td>W1</td><td>67</td><td>215</td><td>251.3</td><td>277.3</td></tr><tr><td>W2</td><td>74</td><td>160</td><td>234.7</td><td>270.7</td></tr><tr><td>W3</td><td>199.3</td><td>211.3</td><td>267.7</td><td>252</td></tr><tr><td>W4</td><td>84</td><td>215</td><td>240</td><td>286</td></tr></table>"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "在《S355J2W耐候钢火焰矫正区组织与性能》这篇文献中，实验材料是什么？",
+    "ground_truth": "实验材料选用厚度为12mm的S355J2W耐候钢，其化学成分和机械性能分别见表1和表2。",
+    "ground_contexts": [
+      "实验材料选用厚度为 12mm 的S355J2W 耐候钢，其化学成分见表 1，机械性能见表 2:表 1 S355J2W钢板化学成分（质量分数，%）W1、W2、W3、W4。为了便于与原始材料比较，将为加热的 S355J2W 试件标记为W0，通过显微组织分析和力学性能研究来找出最优的火焰矫正温度参数。"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "这篇论文的结论是什么？",
+    "ground_truth": "（1）热模拟炉温控制在700℃时，S355J2W有最优的力学性能，硬度值和拉伸性能较母材下降幅度最小，弯曲性能完全符合要求，冲击性能远高于最低要求。（2）700℃时微观组织主要为铁素体、团絮状珠光体和少量残余奥氏体，晶粒细化，晶界有弥散分布的粒状组织。",
+    "ground_contexts": [
+      "- （1）热模拟炉温控制在 700℃时，S355J2W 有最优的力学性能，硬度值和拉伸性能较母材下降幅度最小，弯曲性能完全复合要求，冲击性能远高于此耐候钢钢材本身要求的最低冲击值。\n- （2）热模拟炉温控制在 700℃时，模拟加热区微观组织主要为铁素体、团絮状的珠光体和少量的残余奥氏体，晶粒有所细化，晶界出有明显呈弥散分布的粒状组织，晶界清晰。"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "图2说明了什么？",
+    "ground_truth": "图2是各个试样在扫描电镜下放大2000倍的显微组织，显示组织主要成分为铁素体和珠光体。其中W1（800℃）珠光体减少、组织破碎有残余奥氏体；W2（750℃）珠光体不多但组织紧实；W3（700℃）有大块紧实珠光体，晶粒细化，晶界有弥散粒状组织；W4（650℃）弥散组织不明显。",
+    "ground_contexts": [
+      "图 2 分别是各个试样在扫描电镜下放大 2000 倍的显微组织，从图中可以看成组织的主要成分仍然是铁素体和珠光体。图 2（a）中，珠光体的成分明显减少，且组织内部已经破碎，被部分残余奥氏体填充。图 2（b）中，珠光体的成分仍然不多，但组织相对紧实，且内部没有明显的残余奥氏体的存在，晶界清晰，铁素体组织的成分仍然占较大比重。从中图 2（c）可以见到大块紧实的珠光体组织，且内部没有参杂其他的成分，晶粒也有所细化，晶界出有明显呈弥散分布的粒状组织，晶界清晰。图 2（d）中粒状分别的弥散组织不再明显。",
+      "[Section] 4.显微组织\n[图片说明] 图 1 Fig1 （a）W1",
+      "[Section] 4.显微组织\n[图片说明] （b）W2 （c）W3",
+      "[Section] 4.显微组织\n[图片说明] （d）W4"
+    ],
+    "query_type": "metadata_fig"
+  },
+  {
+    "question": "正文里包含“残余奥氏体”的段落有哪些？",
+    "ground_truth": "包含“残余奥氏体”的段落有：摘要（模拟加热区微观组织主要为铁素体、团絮状的珠光体和少量的残余奥氏体）、显微组织部分（图2a中组织内部被部分残余奥氏体填充）、结论部分（模拟加热区微观组织主要为铁素体、团絮状的珠光体和少量的残余奥氏体）。",
+    "ground_contexts": [
+      "Abstract：In high dynamic car bogie frame S355J2W weathering resistant steel as the research object, heating furnace simulate fire heating experiment conducted at different temperature to analysis microstructure by metallographic microscope and scanning electron microscopy, through the tensile, bending, impact, micro-hardness experiment to carry out mechanical performance research. The results show that: simulation temperature control in 700 ℃, S355J2W has the best mechanical properties, hardness value and the tensile performance is minimal decline than the mother material , impact performance is far higher than the minimum impact of the weathering resistant steel. The microstructure of the simulation heating areas is mainly for the ferrite, group of the floe pearlite and a small amount of retained austenite, and all the grains have been refined.",
+      "图 2 分别是各个试样在扫描电镜下放大 2000 倍的显微组织，从图中可以看成组织的主要成分仍然是铁素体和珠光体。图 2（a）中，珠光体的成分明显减少，且组织内部已经破碎，被部分残余奥氏体填充。图 2（b）中，珠光体的成分仍然不多，但组织相对紧实，且内部没有明显的残余奥氏体的存在，晶界清晰，铁素体组织的成分仍然占较大比重。从中图 2（c）可以见到大块紧实的珠光体组织，且内部没有参杂其他的成分，晶粒也有所细化，晶界出有明显呈弥散分布的粒状组织，晶界清晰。图 2（d）中粒状分别的弥散组织不再明显。",
+      "- （1）热模拟炉温控制在 700℃时，S355J2W 有最优的力学性能，硬度值和拉伸性能较母材下降幅度最小，弯曲性能完全复合要求，冲击性能远高于此耐候钢钢材本身要求的最低冲击值。\n- （2）热模拟炉温控制在 700℃时，模拟加热区微观组织主要为铁素体、团絮状的珠光体和少量的残余奥氏体，晶粒有所细化，晶界出有明显呈弥散分布的粒状组织，晶界清晰。"
+    ],
+    "query_type": "metadata_entity"
+  },
+  {
+    "question": "这篇文献主要研究了什么内容？",
+    "ground_truth": "研究了SO2对碳钢初期大气腐蚀行为的影响，包括腐蚀动力学、腐蚀形貌和腐蚀产物分析。",
+    "ground_contexts": [
+      "林翠1李晓刚23赵晴1南昌航空大学材料科学与工程学院 南昌 北京科技大学材料科学与工程学院 北京中国科学院金属研究所金属腐蚀与防护国家重点实验室 沈阳摘要 通过自建的模拟大气腐蚀系统 借助金相显微镜 扫描电镜 SEM EDX X射线衍射 XRD 和X射线光电子能谱 XPS 研究了 $\\mathrm { S O _ { 2 } }$ 对碳钢初期大气腐蚀行为的影响 并进一步用原子力显微镜从更微观的角度观察了在 $\\mathrm { \\Omega S 2 }$ 环境中初期阶段腐蚀形貌变化 研究结果表明 在 $\\mathrm { \\Omega S O _ { 2 } }$ 污染大气环境中 随 $\\mathrm { S O _ { 2 } }$ 浓度的升高碳钢腐蚀加快 在体积分数为 $5 \\times 1 0 ^ { - 6 } \\ \\mathrm { S O } _ { 2 }$ 的大气环境中 碳钢和耐候钢表面腐蚀主要以条状物生长随着 $\\mathrm { S O _ { 2 } }$ 浓度的升高 腐蚀产物的形貌发生改变 在体积分数为 $5 \\times 1 0 ^ { - 5 } ~ \\mathrm { { S O } _ { 2 } }$ 的大气环境中 条状锈和胞状锈同时生长 在锈层中 S元素以 $\\mathrm { F e S O _ { 4 } }$ $\\mathrm { 4 H _ { 2 } O }$ 的形式存在 腐蚀产物中还有 FeOOH $\\mathrm { \\Omega S 2 }$ 在初期阶段加速了碳钢的腐蚀 降低了碳钢的耐蚀性关键词 碳钢 $\\mathrm { { S O } } _ { 2 } ;$ 初期大气腐蚀中图分类号 TG 文献标识码 A文章编号：1672—9242(2007)06—0013—06",
+      "Abstract： Theindividualeffectof $\\mathrm { S O _ { 2 } }$ ontheatmosphericcorrosionbehaviourofcarbonsteelintheinitialstageswasstudied withself-madesimulatedatmosphericcorrosionsystembymeansofscanningelectronmicroscopy（SEM）X-raydiffraction （XRD） andX-rayphotoelectronspectrum （XPS）．Meanwhileatomicforcemicroscopy（AFM） wasusedtoinvestigatethetopographychanges onthesurfaceofcarbonsteelintheearlystagesin $5 \\times { 1 0 } ^ { - 5 }$ volumefraction $\\mathrm { { S O } _ { 2 } }$ containingatmospherefrommoremicrocosmicpointof view．Itwasprovedthatthecorrosionrateincreasedwithincreasing $\\mathrm { { S O } _ { 2 } }$ contentoftheatmospheretheadditionof $\\mathbf { \\tilde { S } O _ { 2 } }$ andconcentrationincrease $\\mathbf { o f } \\operatorname { S O } _ { 2 }$ contributedtothecorrosion．Forhigh $\\mathrm { { S O } _ { 2 } }$ concentrationthecorrosioneffecto $\\mathbf { \\tilde { S } O _ { 2 } }$ tocarbonsteelwasevident．In pureairlumpishandhoneycombedcorrosionproductsdevelopedthenextendedintheshapeofbranch．Inlow $\\mathrm { S O _ { 2 } }$ concentration（5 $\\times { 1 0 } ^ { - 6 }$ volumefraction）corrosionproductstaketheshapeofbar．Inhigh $\\mathrm { { S O _ { 2 } } }$ concentration $( 5 \\times 1 0 ^ { - 5 }$ volumefraction）barand globularrustgrowatthesametime．TheSelementexistedintheformof $\\mathrm { F e S O _ { 4 } \\cdot 4 H _ { 2 } O }$ wasfoundintherustlayerand $\\gamma _ { \\mathrm { - F e O O H } }$ was alsodetectedintherustlayer． $\\mathrm { { S O } _ { 2 } }$ acceleratedthecorrosionofsteelandweakenthecorrosionresistanceintheinitialstage"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "这篇论文的核心结论是什么？",
+    "ground_truth": "在初期阶段，随SO2浓度升高碳钢腐蚀加快；低浓度（5e-6）腐蚀以条状物生长，高浓度（5e-5）条状锈和胞状锈同时生长；腐蚀产物主要是FeSO4·4H2O和γ-FeOOH；SO2加速了腐蚀，降低了耐蚀性。",
+    "ground_contexts": [
+      "林翠1李晓刚23赵晴1南昌航空大学材料科学与工程学院 南昌 北京科技大学材料科学与工程学院 北京中国科学院金属研究所金属腐蚀与防护国家重点实验室 沈阳摘要 通过自建的模拟大气腐蚀系统 借助金相显微镜 扫描电镜 SEM EDX X射线衍射 XRD 和X射线光电子能谱 XPS 研究了 $\\mathrm { S O _ { 2 } }$ 对碳钢初期大气腐蚀行为的影响 并进一步用原子力显微镜从更微观的角度观察了在 $\\mathrm { \\Omega S 2 }$ 环境中初期阶段腐蚀形貌变化 研究结果表明 在 $\\mathrm { \\Omega S O _ { 2 } }$ 污染大气环境中 随 $\\mathrm { S O _ { 2 } }$ 浓度的升高碳钢腐蚀加快 在体积分数为 $5 \\times 1 0 ^ { - 6 } \\ \\mathrm { S O } _ { 2 }$ 的大气环境中 碳钢和耐候钢表面腐蚀主要以条状物生长随着 $\\mathrm { S O _ { 2 } }$ 浓度的升高 腐蚀产物的形貌发生改变 在体积分数为 $5 \\times 1 0 ^ { - 5 } ~ \\mathrm { { S O } _ { 2 } }$ 的大气环境中 条状锈和胞状锈同时生长 在锈层中 S元素以 $\\mathrm { F e S O _ { 4 } }$ $\\mathrm { 4 H _ { 2 } O }$ 的形式存在 腐蚀产物中还有 FeOOH $\\mathrm { \\Omega S 2 }$ 在初期阶段加速了碳钢的腐蚀 降低了碳钢的耐蚀性关键词 碳钢 $\\mathrm { { S O } } _ { 2 } ;$ 初期大气腐蚀中图分类号 TG 文献标识码 A文章编号：1672—9242(2007)06—0013—06",
+      "- 在初期阶段 随 $\\mathrm { S O _ { 2 } }$ 浓度的升高 碳钢腐蚀加速。\n- 在无污染的纯空气中 碳钢和耐候钢初期腐蚀行为为表面出现团块状腐蚀产物 随着腐蚀的不断进行 腐蚀产物以树枝状向前延伸 碳钢和耐候钢在体积分数为 $5 \\times 1 0 ^ { - 6 } ~ \\mathrm { { s o } _ { 2 } }$ 的大气污染环境中腐蚀主要以条状物生长 随着 $\\mathrm { { S O _ { 2 } } }$ 浓度的升高 腐蚀产物的形貌发生改变在体积分数为 $5 \\times 1 0 ^ { - 5 } ~ \\mathrm { { s o } _ { 2 } }$ 的大气污染环境中 条状锈和胞状锈同时生长\n- 含体积分数为 $5 \\times 1 0 ^ { - 5 } ~ \\mathrm { { s o } _ { 2 } }$ 污染大气环境中 $\\mathrm { F e S O _ { 4 } }$ HO和 $\\gamma _ { \\mathrm { - F e O O H } }$ 是碳钢和耐候钢主要的腐蚀产物。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "SO2浓度对碳钢初期腐蚀速率和腐蚀形貌分别有什么影响？",
+    "ground_truth": "腐蚀速率随SO2浓度升高而加快；低浓度（5e-6）时腐蚀以条状物生长，高浓度（5e-5）时条状锈和胞状锈同时生长。",
+    "ground_contexts": [
+      "物质增重随时间的变化如图 所示 从图 中可以看出 $\\mathrm { S O _ { 2 } }$ 工业污染大气环境中的增重高于在纯空气中 不含 $\\mathrm { S O _ { 2 } \\ }$ 的 含体积分数为 $5 \\times 1 0 ^ { - 5 }$ $\\mathrm { { S O _ { 2 } } }$ 大气环境中的增重大于含体积分数为 $5 \\times { 1 0 } ^ { - 6 }$ $\\mathrm { S O _ { 2 } }$ 大气环境中的。",
+      "在低 $\\mathrm { S O _ { 2 } }$ 浓度的大气环境中 腐蚀主要以条状物生长 随着 $\\mathrm { S O _ { 2 } }$ 浓度的升高 腐蚀产物的形貌发生改变 在高 $\\mathrm { S O _ { 2 } }$ 浓度的大气环境中 条状锈和胞状锈同时生长$\\mathrm { { S O _ { 2 } } }$ 的大气环境中 条状和胞状腐蚀产物几乎都有开裂现象 使得氧和其它腐蚀介质从裂纹处渗入到基体 加速基体的腐蚀 $\\mathrm { { S O _ { 2 } } }$ 浓度越高 腐蚀情况就越厉害 在初期阶段 $\\mathrm { { S O _ { 2 } } }$ 浓度的升高会加速钢的腐蚀。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "它是如何加速腐蚀的？",
+    "ground_truth": "SO2溶于水膜形成亚硫酸，离解产生H+和HSO3-，HSO3-氧化为SO42-，与Fe2+生成FeSO4·xH2O，FeSO4进一步氧化生成FeOOH和H2SO4，H2SO4与Fe反应又生成FeSO4，形成循环反应。同时锈层裂纹导致腐蚀介质渗入基体，加速腐蚀。",
+    "ground_contexts": [
+      "$\\mathrm { { S O _ { 2 } } }$ 分子的极性极强 易溶于水",
+      "$$\n\\begin{array}{l} \\mathrm{Fe} ^ {2 +} + \\mathrm{SO} _ {4} ^ {2 -} (\\mathrm{aq}) + \\mathrm{xH} _ {2} \\mathrm{O} \\rightarrow \\mathrm{FeSO} _ {4} \\cdot \\mathrm{xH} _ {2} \\mathrm{O} \\\\ 4 \\mathrm{FeSO} _ {4} \\cdot \\mathrm{xH} _ {2} \\mathrm{O} + \\mathrm{O} _ {2} + (6 - 4 \\mathrm{x}) \\mathrm{H} _ {2} \\mathrm{O} \\rightarrow \\\\ 4 \\mathrm{FeOOH} + 4 \\mathrm{H} _ {2} \\mathrm{SO} _ {4} \\\\ \\end{array}\n$$"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "在腐蚀初期阶段，碳钢表面水膜形成后发生了什么反应？",
+    "ground_truth": "首先发生阳极溶解：Fe - 2e- → Fe2+；阴极反应：O2 + 2H2O + 4e- → 4OH-；Fe2+与OH-结合生成FeOH+，进一步生成Fe(OH)2。当pH>5.5时Fe(OH)2稳定存在。",
+    "ground_contexts": [
+      "$$\n\\mathrm{Fe} - 2 \\mathrm{e} ^ {-} \\rightarrow \\mathrm{Fe} ^ {2 +}\n$$",
+      "pH＞5．5Fe（OH） 稳定存在［11-12］。因此当 $\\mathrm { F e } ^ { 2 + }$ 移到足够高的地区时 $\\mathrm { F e ( O H ) _ { 2 } }$ 在钢铁表面形成 在腐蚀过程中能观察到它沿着划痕生长 但一旦 $\\mathrm { p H }$ 值下降 它就不能稳定存在 金相显微镜下能观察到呈绿色的 $\\mathrm { F e } ^ { 2 + }$ 和 $\\mathrm { F e O H } ^ { + }$ 。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "腐蚀产物中S元素以什么形式存在？检测到了哪些腐蚀产物？",
+    "ground_truth": "S元素以FeSO4·4H2O的形式存在；腐蚀产物中还有γ-FeOOH。",
+    "ground_contexts": [
+      "林翠1李晓刚23赵晴1南昌航空大学材料科学与工程学院 南昌 北京科技大学材料科学与工程学院 北京中国科学院金属研究所金属腐蚀与防护国家重点实验室 沈阳摘要 通过自建的模拟大气腐蚀系统 借助金相显微镜 扫描电镜 SEM EDX X射线衍射 XRD 和X射线光电子能谱 XPS 研究了 $\\mathrm { S O _ { 2 } }$ 对碳钢初期大气腐蚀行为的影响 并进一步用原子力显微镜从更微观的角度观察了在 $\\mathrm { \\Omega S 2 }$ 环境中初期阶段腐蚀形貌变化 研究结果表明 在 $\\mathrm { \\Omega S O _ { 2 } }$ 污染大气环境中 随 $\\mathrm { S O _ { 2 } }$ 浓度的升高碳钢腐蚀加快 在体积分数为 $5 \\times 1 0 ^ { - 6 } \\ \\mathrm { S O } _ { 2 }$ 的大气环境中 碳钢和耐候钢表面腐蚀主要以条状物生长随着 $\\mathrm { S O _ { 2 } }$ 浓度的升高 腐蚀产物的形貌发生改变 在体积分数为 $5 \\times 1 0 ^ { - 5 } ~ \\mathrm { { S O } _ { 2 } }$ 的大气环境中 条状锈和胞状锈同时生长 在锈层中 S元素以 $\\mathrm { F e S O _ { 4 } }$ $\\mathrm { 4 H _ { 2 } O }$ 的形式存在 腐蚀产物中还有 FeOOH $\\mathrm { \\Omega S 2 }$ 在初期阶段加速了碳钢的腐蚀 降低了碳钢的耐蚀性关键词 碳钢 $\\mathrm { { S O } } _ { 2 } ;$ 初期大气腐蚀中图分类号 TG 文献标识码 A文章编号：1672—9242(2007)06—0013—06",
+      "利用 XPS对体积分数为 $5 \\times 1 0 ^ { - 5 } ~ \\mathrm { { s o } _ { 2 } }$ 模拟大气环境中碳钢表面的腐蚀产物进行了分析 发现腐蚀产物主要是 $\\mathrm { F e S O _ { 4 } \\cdot 4 H _ { 2 } O }$ 和 $\\gamma _ { \\mathrm { \\tiny ~ F e O O H } _ { c } }$ 图 给出了体积分数为 $5 \\times 1 0 ^ { - 5 } ~ \\mathrm { { s o } _ { 2 } }$ 工业污染大气环境中碳钢表面的腐蚀产物溅射3min的光电子能谱，从图5中可以看出腐蚀产物中有 FeO和 S元素 $0 1 \\mathrm { { s } }$ $\\mathrm { F e ^ { 2 } p }$ 和 $\\mathrm { S 2 p }$ 的结合能分别为 $5 3 2 \\mathrm { e V } , \\ 7 2 1 \\mathrm { e V }$ 和 $1 6 3 \\mathrm { e V _ { \\circ } }$ $\\mathrm { F e S O _ { 4 } }$ 中 $_ { 0 1 \\mathrm { s } }$ 的结合能是 $4 0 \\mathrm { e V } ,$ ，Y $\\mathrm { F e O O H }$ 中 $_ { 0 1 \\mathrm { s } }$ 的结合能是 $5 3 0 . \\ 1 0 \\mathrm { e V } _ { \\circ }$ 实验中 通过高斯拟合 Os峰成两峰 分别对应于 $\\mathrm { F e S O _ { 4 } }$ 和 $\\gamma -$ FeOOH $\\mathrm { F e S O _ { 4 } }$ 中 $_ { 0 1 \\mathrm { s } }$ 峰的结合能为 $3 \\mathrm { e V } ,$ ，Y-FeOOH中 Os峰的结合能为 $5 3 0 . ~ 7 _ { \\mathrm { e V _ { \\circ } } }$"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "这篇论文的参考文献中，有没有关于铜在SO2环境中腐蚀的研究？",
+    "ground_truth": "有。参考文献[7] Aastrup等人研究了Cu在RH下含SO2的空气界面反应；参考文献[8] Wadsak利用AFM和红外光谱原位观察了黄铜表面初期腐蚀；参考文献[9] Eriksson和Sydberger等研究铜在含SO2的环境中检测到了CuSO4·5H2O等腐蚀产物。",
+    "ground_contexts": [
+      "Keywords： carbonsteel； $\\mathrm { S O _ { 2 } }$ ；initialatmosphericcorrosion材料在大气中的腐蚀性受环境因素的影响 如温度 湿度和大气中所含的污染物 $\\mathrm { S O _ { 2 } , C I , C O _ { 2 } }$ $\\mathrm { N O } _ { \\mathrm { X } }$ 等 大气环境的特点决定了材料大气腐蚀的特点［1-2］。探索在初期阶段材料表面与其周围环境发生的反应对于了解腐蚀的机制非常重要 尤其是单个污染因素对金属材料腐蚀的影响 这样才能为研究多个因素的交互作用提供基础研究表明腐蚀活性最大的是潮湿的 强烈污染的工业大气［3］ 目前有一些研究者在室内探讨含 $\\mathrm { S O _ { 2 } }$ 模拟大气环境中金属的初期腐蚀行为［4-6］。Sy-dberger等人在实验室模拟加速试验中使用了接近真实环境的 $\\mathrm { S O _ { 2 } }$ 浓度 研究了在腐蚀初期锌与二氧化硫间的相互作用 研究发现 $\\mathrm { { S O _ { 2 } } }$ 的沉积强烈的依赖湿度 并随时间的增加沉积量减少 Aastrup和Leygraf教授利用 QCM和红外光谱原位研究了 Cu在 RH 下含 $\\mathrm { S O _ { 2 } }$ 的空气界面反应 得到了通入 $\\mathrm { S O _ { 2 } }$ 后的大气腐蚀动力学［7］ Wadsak利用原子力显微镜和红外光谱原位观察了在一定湿度和 $\\mathrm { S O _ { 2 } }$ 大气环境中黄铜表面初期腐蚀产物和腐蚀形貌的变化 在通入 $\\mathrm { { S O _ { 2 } } }$ min后在黄铜表面生成一层 $\\operatorname { C u } 0 ,$ 继续腐蚀能够观察到 $\\mathrm { { C u S O _ { 3 } } }$ 的生成［8］ Eriksson和 Sydberger等研究铜在含 $\\mathrm { S O _ { 2 } }$ 的环境中检测到了 $\\mathrm { C u S O _ { 4 } } \\cdot \\mathrm { 5 H _ { 2 } O }$ 和 $\\mathrm { { C u ( \\mathrm { ~ I ~ } \\ ) _ { 2 } C u ( H \\ ) ( S O _ { 3 } \\ ) _ { 2 } \\bullet 2 H _ { 2 } O } }$ 等腐蚀产物［9］碳钢仍然是目前使用最为普遍的金属材料之一 一直以来都是深受人们关注的重要课题 但目前对碳钢在 $\\mathrm { { S O _ { 2 } } }$ 污染大气环境中初期阶段腐蚀机理的研究很少［10］ 文中利用金相显微镜 扫描电镜和X射线衍射研究碳钢初期腐蚀阶段的形貌和产物分析 $\\mathrm { S O _ { 2 } }$ 单个环境因素所起的作用"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "这篇文献中，碳钢试样是如何制备的？",
+    "ground_truth": "采用低碳钢，成分（质量分数）为C 0.16, Si 0.2, S 0.2, Mn 0.65, P 0.018，其余为Fe。试样尺寸40mm×20mm×3mm，用SiC砂纸打磨至1500#，超声波清洗，然后用1.5μm金刚石研磨膏抛光。",
+    "ground_contexts": [
+      "试样采用低碳钢 分析成分 质量分数 为 $\\small \\mathrm { ~ C ~ } 0 . \\mathrm { ~ 1 6 , ~ } \\mathrm { S i } 0 . \\mathrm { ~ 2 , ~ S ~ 0 . ~ 2 , ~ M ~ n ~ 0 . ~ } \\mathrm { 6 5 , ~ P ~ 0 . ~ } \\mathrm { 0 1 8 , }$ 其余为 $\\mathrm { F e } _ { \\circ }$ 试样尺寸为 $4 0 \\mathrm { \\ m m } \\times 2 0 \\mathrm { \\ m m } \\times 3 \\mathrm { \\ m m } _ { \\mathrm { o } }$ 用 SiC砂纸打磨至 $1 5 0 0 ^ { \\# }$ 在超声波中清洗干净然后用 1．5 $\\mu _ { \\mathrm { m } }$ 金刚石研磨膏抛光"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "表1中条状锈和圆胞状锈的元素组成有什么不同？",
+    "ground_truth": "条状锈含Fe 66.33%，O 33.67%，S 0%；圆胞状锈含Fe 30.82%，O 68.76%，S 0.42%。圆胞状锈中含有S元素，而条状锈中没有。",
+    "ground_contexts": [
+      "[Section] 2．2 腐蚀形貌特征\n[Caption] 表 含体积分数为 $5 \\times 1 0 ^ { - 5 } \\otimes _ { 2 }$ 的大气环境中碳钢表面腐蚀产物的 EDX分析结果 质量分数 Table1 EDXresultsofcorrosionproductsofcarbonsteelinair containing $5 \\times { 1 0 } ^ { - 5 }$ volumefractionSO\n[Table HTML]\n<table><tr><td rowspan=\"2\">不同腐蚀产物</td><td colspan=\"3\">元素</td></tr><tr><td>Fe</td><td>O</td><td>S</td></tr><tr><td>条状锈</td><td>66.33</td><td>33.67</td><td>0</td></tr><tr><td>圆胞状锈</td><td>30.82</td><td>68.76</td><td>0.42</td></tr></table>"
+    ],
+    "query_type": "metadata_fig"
+  },
+  {
+    "question": "图3中观察到的腐蚀产物形貌有什么特点？",
+    "ground_truth": "图3显示在含体积分数为5×10^-5 SO2的大气环境中腐蚀226h后，在金相显微镜下观察到条状锈和胞状锈同时生长，条状物向外延伸，胞状锈下方有多个方向的条状锈。",
+    "ground_contexts": [
+      "[Section] 2．2 腐蚀形貌特征\n[图片说明] 图 含体积分数为 $5 \\times 1 0 ^ { - 5 } ~ \\mathrm { { s o } _ { 2 } }$ 的大气环境中腐蚀 h金相显微镜下观察碳钢表面的腐蚀产物 Fig．3 Corrosionproductsobservedonthesurfaceofcarbon steelafter226hoursinaircontaining5×10－5volume fraction $\\mathrm { S O _ { 2 } }$"
+    ],
+    "query_type": "metadata_fig"
+  },
+  {
+    "question": "这篇文献主要研究了什么内容？",
+    "ground_truth": "对比研究了传统耐候钢Q450NQR1和分别添加Sn以及Sn-Sb复合添加后的耐候钢在模拟高湿热海洋大气环境下的耐蚀性规律，分析了Sn、Sn-Sb复合对钢的电化学行为、腐蚀锈层形貌、元素分布和腐蚀产物物相组成的影响。",
+    "ground_contexts": [
+      "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   **Role:** Rigorous scientific literature editor.\n    *   **Task:** Generate a search abstract (summary) based on the provided first page text of a literature.\n    *   **Constraints:**\n        *   Length: 3-5 sentences.\n        *   Word count: 200-400 Chinese characters.\n        *   Content: Use only facts appearing in the fragment, no fabrication.\n        *   Format: Direct output of the abstract text only, no title, no markdown fences.\n    *   **Input:** A snippet from the first page of a research paper (including authors, affiliations, abstract, keywords, and English abstract).\n\n2.  **Analyze the Input Text:**\n    *   **Authors/Affiliation:** Huang Tao, Wang Xiangdong, etc., from Central Iron & Steel Research Institute, Beijing.\n    *   **Subject:** Weathering steel Q450NQR1 and modified versions (Sn-added, Sn-Sb composite added).\n    *   **Environment:** Simulated high humidity-heat marine atmosphere (wet-dry cyclic accelerated corrosion test chamber).\n    *   **Methods:** Potentiodynamic polarization curves, SEM, EPMA, XRD, XPS.\n    *   **Results:**\n        *   Sn addition improves corrosion resistance.\n        *   Sn-Sb composite addition further improves corrosion resistance.\n        *   Rust layer is dense and continuous.\n        *   Main phases: $\\mathrm { F e } _ { 3 } { \\mathrm O } _ { 4 } / \\gamma \\mathrm { - F e } _ { 2 } { \\mathrm O } _ { 3 }$, α-FeOOH, γ-FeOOH.\n        *   Distribution: Sn enriches in rust layer, Sb distributes uniformly.\n        *   Mechanism: Surface oxides ($\\mathrm { S n O } _ { 2 } , ~ \\mathrm { S b } _ { 2 } \\mathrm { O } _ { 5 }$) block Cl- penetration. Hydration of Sn/Sb inhibits $\\mathrm { F e } ^ { 3 + }$ hydrolysis producing H+, improving pH, slowing Fe anodic dissolution.\n    *   **Keywords:** Sn-Sb weathering steel, wet-dry cyclic, high humidity-heat marine atmosphere, corrosion resistance.\n\n3.  **Drafting the Abstract (Iterative Process):**\n\n    *   *Attempt 1 (Mental Outline):*\n        This study compares Q450NQR1 steel with Sn and Sn-Sb added versions. They used a wet-dry test for marine atmosphere. They used SEM, XRD, etc. Results show Sn-Sb is best. Rust",
+      "黄 涛 王向东 陈小平 汪兵 贾书君 刘清友1) 钢铁研究总院工程用钢研究所, 北京 100081 通讯作者, E-mail: Wang Xiangdong @cisri.com.cn摘 要 对比研究了传统耐候钢 Q450NQR1 和在此基础上分别添加 Sn 以及 Sn-Sb 复合添加后的耐候钢在模拟高湿热海洋大气环境下的耐蚀性规律。通过在干/湿交替加速腐蚀试验箱中进行模拟加速腐蚀试验，利用动电位极化曲线、SEM、EPMA、XRD和 XPS等测试手段分析了Sn、Sn-Sb复合对钢的电化学行为、腐蚀锈层形貌、元素分布和腐蚀产物物相组成的影响。结果表明：添加Sn后试验钢耐蚀性明显提高，复合添加 Sn-Sb 后试验钢的耐蚀性进一步提高；含 Sn、Sb 试验钢的腐蚀锈层致密、连续，主要是 $\\mathrm { F e } _ { 3 } { \\mathrm O } _ { 4 } / \\gamma \\mathrm { - F e } _ { 2 } { \\mathrm O } _ { 3 } .$ 、α-FeOOH、γ-FeOOH，且发现 Sn 在锈层中富集明显，Sb 在锈层中均匀分布。由于试验钢表面 $\\mathrm { S n O } _ { 2 } , ~ \\mathrm { S b } _ { 2 } \\mathrm { O } _ { 5 }$ 氧化物的存在，提高了阻挡侵蚀性Cl-渗透的能力；并且Sn、Sb通过在Cl-环境介质下的水合作用共同抑制了 $\\mathrm { F e } ^ { 3 + }$ 水解产生H+的过程，改善腐蚀微区pH值，减缓Fe 的阳极溶解，因而含Sn-Sb 耐候钢表现出优异的耐蚀性。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "有没有关于Sn-Sb复合添加对耐候钢耐蚀性影响的研究？",
+    "ground_truth": "有。文献指出，关于Sn、Sb复合添加对钢铁材料在南海海洋大气环境中的耐蚀性影响，这方面研究匮乏，该文献对此进行了探究。",
+    "ground_contexts": [
+      "此外，随着国家海洋战略的实施，尤其是对南海岛礁的开发利用，针对其高温、高湿、高氯离子、强辐射这一气候特点，对于南海岛礁基础设施用耐候钢，国际上均无在近海岸南海地区使用的历史，国内也无耐南海大气腐蚀的成熟钢品种[16]。本文通过前期的文献检索和试验研究，采用电化学测试、干湿交替腐蚀实验和锈层分析等手段，探究 Sn-Sb复合耐候钢在实验室模拟高湿热海洋大气环境下的腐蚀行为，并分析 Sn-Sb 提高材料耐蚀性的机理。",
+      "黄 涛 王向东 陈小平 汪兵 贾书君 刘清友1) 钢铁研究总院工程用钢研究所, 北京 100081 通讯作者, E-mail: Wang Xiangdong @cisri.com.cn摘 要 对比研究了传统耐候钢 Q450NQR1 和在此基础上分别添加 Sn 以及 Sn-Sb 复合添加后的耐候钢在模拟高湿热海洋大气环境下的耐蚀性规律。通过在干/湿交替加速腐蚀试验箱中进行模拟加速腐蚀试验，利用动电位极化曲线、SEM、EPMA、XRD和 XPS等测试手段分析了Sn、Sn-Sb复合对钢的电化学行为、腐蚀锈层形貌、元素分布和腐蚀产物物相组成的影响。结果表明：添加Sn后试验钢耐蚀性明显提高，复合添加 Sn-Sb 后试验钢的耐蚀性进一步提高；含 Sn、Sb 试验钢的腐蚀锈层致密、连续，主要是 $\\mathrm { F e } _ { 3 } { \\mathrm O } _ { 4 } / \\gamma \\mathrm { - F e } _ { 2 } { \\mathrm O } _ { 3 } .$ 、α-FeOOH、γ-FeOOH，且发现 Sn 在锈层中富集明显，Sb 在锈层中均匀分布。由于试验钢表面 $\\mathrm { S n O } _ { 2 } , ~ \\mathrm { S b } _ { 2 } \\mathrm { O } _ { 5 }$ 氧化物的存在，提高了阻挡侵蚀性Cl-渗透的能力；并且Sn、Sb通过在Cl-环境介质下的水合作用共同抑制了 $\\mathrm { F e } ^ { 3 + }$ 水解产生H+的过程，改善腐蚀微区pH值，减缓Fe 的阳极溶解，因而含Sn-Sb 耐候钢表现出优异的耐蚀性。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "Sn和Sb在锈层中是如何分布的？",
+    "ground_truth": "Sn在内、外锈层均有富集，内锈层稍多些；Sb在锈层中分布较均匀，富集现象不明显。",
+    "ground_contexts": [
+      "图 6、7 是 Q450-Sn-Sb 耐候钢腐蚀 96 h 后的锈层横截面经电子探针面扫描和线扫描，得到合金元素 Sn、Sb 在锈层中的分布。根据图中颜色的变化可以判断出某种元素在锈层中的聚集分布情况，从图中发现 Sn 在内、外锈层均有富集，但内锈层稍多些，而 Sb 在锈层中分布较均匀，富集现象不明显。",
+      "[Section] 2.3锈层形貌\n[图片说明] Hig Low 图 6 合金元素 Sn、Sb 在 Q450-Sn-Sb 耐候钢中锈层截面分布的 EPMA 图谱 Fig.6 EPMA mapping of alloying elements in the rust formed on the Sn-Sb weathering steel"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "Sn和Sb复合添加后，腐蚀速率比Q450下降了约多少？",
+    "ground_truth": "复合添加0.3 wt%Sn + 0.12 wt%Sb后，Q450-Sn-Sb耐候钢整体的平均腐蚀速率比Q450下降了约20%。",
+    "ground_contexts": [
+      "图 3 是3 种耐候钢经干/湿交替加速腐蚀试验的腐蚀速率曲线。由图可知，单独添加 Sn和复合添加 Sn、Sb 均能明显提高材料的耐蚀性。从腐蚀速率曲线趋势可以看出，三者的腐蚀速率随时间变化趋势相一致，都是呈现先减小后增加的趋势。这是因为在腐蚀初期和中期（0 h～72 h），不含 Sn、Sb 的 Q450 表面容易遭受腐蚀，很快能形成一定厚度的锈层，因而待腐蚀锈层稳定形成后，腐蚀速率有所下降。但是对于含 Sn、Sb 的耐候钢，由于一开始表面氧化膜的存在，腐蚀速率较小，加上表面形成一定厚度的锈层，能够阻滞腐蚀反应，因而出现腐蚀速率下降的现象。在腐蚀后期（72 h～96 h），外界侵蚀性 Cl-传输、渗透到钢基体表面，锈层变得疏松、开始脱落，锈层的失效加速了腐蚀过程。从图还可以发现，单独添加约 0.3 wt%的Sn 后，Q450-Sn 耐候钢整体的平均腐蚀速率比 Q450 下降了约15%。复合添加0.3 wt%Sn + 0.12 wt%Sb后，Q450-Sn-Sb耐候钢整体的平均腐蚀速率比Q450下降了约20%。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "为什么添加Sn和Sb能提高耐蚀性？",
+    "ground_truth": "因为Sn和Sb在钢表面形成SnO₂、Sb₂O₅氧化膜，提高了阻挡侵蚀性Cl⁻渗透的能力；并且Sn、Sb通过在Cl⁻环境下的水合作用共同抑制Fe³⁺水解产生H⁺的过程，改善腐蚀微区pH值，减缓Fe的阳极溶解。",
+    "ground_contexts": [
+      "从上述试验结果看出，在 Q450 中添加 Sn 后，Q450-Sn 耐候钢表现出优良的耐蚀性，继续添加 Sb 后，Q450-Sn-Sb 耐候钢的耐蚀性进一步提高。这表明 Sn、Sb 的加入会影响腐蚀过程，有助于耐蚀性的提高。一般认为，耐候钢在大气中的腐蚀行为与其表面薄液膜状态有关，其腐蚀过程首先是 Fe 的阳极溶解，由 Fe失去电子得到 $\\mathrm { F e } ^ { 2 + }$ ，再经过 $\\mathrm { F e } ^ { 2 + }$ 后续的复杂氧化还原反应形成不同的 Fe 的氧化物或羟基氧化物[21-22]。这些 Fe 的氧化物或羟基氧化物组成了覆盖在基体表面的锈层，影响着钢的腐蚀行为。图 2 表明腐蚀介质中单独添加 Sn，复合添加 Sn、Sb 后，均影响腐蚀反应过程，尤其是 Sn、Sb 复合添加后明显抑制了腐蚀的阴极和阳极过程。Nguyen和 Li 等[13,23]在研究 Sn 对低合金钢在酸性 Cl-溶液下的腐蚀行为影响时，认为在钢表面形成了 $\\mathrm { S n O } _ { 2 }$ 氧化膜，这种氧化膜几乎不溶于水、酸、碱溶液，它提高了腐蚀过程中锈层电阻+电荷转移电阻值。Egamy 等错误!未找到引用源。研究认为 Sb 电极在酸性溶液的电化学过程中表面形成了 ${ \\mathrm { S b } } _ { 2 } { \\mathrm { O } } _ { 3 }$ 的内膜和 ${ \\bf S b } _ { 2 } { \\bf O } _ { 5 }$ 的外膜，这些氧化膜具有良好的稳定性且不溶于水，有助于提高基体的耐蚀性。而 D.P.Le 等错误!未找到引用源。在研究烟气脱硫装置用含 Sb低合金钢的腐蚀时发现，添加 Sb 后不仅在钢表面形成了 ${ \\bf S b } _ { 2 } { \\bf O } _ { 5 }$ 氧化膜，提高了基体耐蚀性，Sb 还与 Cu 形成的化合物能更好地抑制阳极和阴极反应。图 6 和图 7 中锈层的 EPMA 面扫描和线扫描结果进一步表明，含 Sn-Sb 的钢锈层中由于存在合金元素 Sn 的富集和 Sb 的均匀分布，XPS 测试结果证实形成了 $\\mathrm { S n O } _ { 2 }$ 、 ${ \\bf S b } _ { 2 } { \\bf O } _ { 5 }$ 氧化物，使锈层更加致密，从而阻止 Cl-向基体渗透，提高钢的耐蚀性。图 5(c)中锈层截面亦证实了添加 Sn、Sb 后，锈层与基体处结合更致密，空洞及纵向贯穿性裂纹减少，锈层更连续，因而耐蚀性得到了提高。",
+      "图 10 是 Q450-Sn-Sb 耐候钢在干/湿交替加速腐蚀 24 h、48 h、96 h 后锈层的 XPS 图谱。图 10(a)XPS 全谱图中给出了锈层中 C 1S、O 1s、Sn 3d、Sb 3d、Fe 2p、Cu 2p 和 Ni 2p 的峰，表明在腐蚀产物中存在 Sn、Sb、Fe、Cu、Ni、O 等元素。根据相关文献[13,19-20]，表 3 给出了不同元素对应的峰、结合能和相应的腐蚀产物。图 10(b)～(d)是 Sn、Sb、Fe 三种元素的精细谱，可以看出在不同腐蚀周期下，元素在锈层中的存在价态形式并没有发生变化，并且据此可以判断出 Sn 和 Sb 在锈层产物中以化合物 $\\mathrm { S n O } _ { 2 }$ 、 ${ \\bf S b } _ { 2 } { \\bf O } _ { 5 }$ 的形式存在，Fe 的存在形式比较多样，主要是 $\\mathrm { F e } _ { 2 } \\mathrm { O } _ { 3 }$ 、 $\\mathrm { F e O O H } .$ 。表 4 为锈层中不同价态原子浓度，结合 Sn、Sb 元素在锈层截面的 EPMA 分析，以及不同时间下的峰强度计数，说明随着腐蚀过程的进行，Sn、Sb 在锈层中的分布逐渐增多，在腐蚀过程中发挥重要作用。",
+      "然而，上述反应式（1）～（4）和（8）～（9）中产生的 $\\mathrm { H } ^ { + }$ 由于同离子效应，一定程度上又能抑制反应式（12）向右进行，故能减少阳极 H+的产生，减缓 Fe 的阳极溶解。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "Q450-Sn-Sb钢的锈层中主要物相有哪些？",
+    "ground_truth": "主要物相为Fe₃O₄/γ-Fe₂O₃、α-FeOOH、γ-FeOOH，整个腐蚀过程中未检测到β-FeOOH。",
+    "ground_contexts": [
+      "Sb 的 Q450 钢在腐蚀后期(96 h)才出现 α-FeOOH 物相。而只加入 Sn 的 Q450-Sn 钢在腐蚀初期(24 h)锈层已经出现了 α-FeOOH 物相，至腐蚀中后期时 $\\mathrm { F e } _ { 3 } \\mathrm { O } _ { 4 } / \\gamma \\mathrm { - F e } _ { 2 } \\mathrm { O } _ { 3 }$ 的含量逐渐减少，转变为 α-FeOOH，初始的锈层组成物 γ-FeOOH 增多。复合添加 Sn-Sb 的 Q450-Sn-Sb 钢锈层中 α-FeOOH 的相对含量比 Q450 和 Q450-Sn 钢要多，并且整个腐蚀过程中未检测到锈层中含有 β-FeOOH 物相。可见，添加 Sn、Sn-Sb 复合有助于改善锈层的物相组成比例，促进α-FeOOH 的形成，抑制 β-FeOOH 的生成，降低 $\\mathrm { F e } _ { 3 } \\mathrm { O } _ { 4 } / \\gamma \\mathrm { - F e } _ { 2 } \\mathrm { O } _ { 3 }$ 的相对含量，进而提高钢的耐蚀性。",
+      "- (1) 在传统耐候钢Q450基础上添加Sn能显著提高钢在模拟南海海洋大气环境中的耐蚀性，复合添加 Sn、Sb 后耐蚀性进一步提高。动电位极化曲线测试结果表明，Sn、Sb 还通过影响腐蚀的阴极和阳极过程，起到缓蚀剂的作用，表现为 Sn影响腐蚀的阳极过程，Sb 影响腐蚀的阴极过程。\n- (2) 锈层中出现Sn的富集和Sb的均匀分布，钢表面形成了 $\\mathrm { S n O } _ { 2 } , \\mathrm { S b } _ { 2 } \\mathrm { O } _ { 5 }$ 耐蚀性氧化膜，这层氧化膜可以提高阻挡侵蚀性 Cl-渗透的能力，从而提高材料的耐蚀性。\n- (3) Sn、Sb 通过在 Cl-环境介质下的水合作用共同抑制了 $\\mathrm { F e } ^ { 3 + }$ 水解产生 H+的过程，改善腐蚀微区 pH值，缓解阳极溶解过程。\n- (4) Q450-Sn 和 Q450-Sn-Sb 耐候钢的锈层主要是 $\\mathrm { F e } _ { 3 } \\mathrm { O } _ { 4 } / \\gamma – \\mathrm { F e } _ { 2 } \\mathrm { O } _ { 3 }$ 、α-FeOOH、γ-FeOOH，Q450 在腐蚀中、后期锈层中出现了 β-FeOOH。钢中 Sn、Sn-Sb 的加入可以提高在\n\n锈层中起保护性作用的 α-FeOOH 含量比例，抑制了对锈层保护性不利的 β-FeOOH产生，提高了材料的耐蚀性。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "这篇论文中，动电位极化曲线测试表明Sn和Sb分别影响腐蚀的哪个过程？",
+    "ground_truth": "Sn影响腐蚀的阳极过程，Sb影响腐蚀的阴极过程。",
+    "ground_contexts": [
+      "- (1) 在传统耐候钢Q450基础上添加Sn能显著提高钢在模拟南海海洋大气环境中的耐蚀性，复合添加 Sn、Sb 后耐蚀性进一步提高。动电位极化曲线测试结果表明，Sn、Sb 还通过影响腐蚀的阴极和阳极过程，起到缓蚀剂的作用，表现为 Sn影响腐蚀的阳极过程，Sb 影响腐蚀的阴极过程。\n- (2) 锈层中出现Sn的富集和Sb的均匀分布，钢表面形成了 $\\mathrm { S n O } _ { 2 } , \\mathrm { S b } _ { 2 } \\mathrm { O } _ { 5 }$ 耐蚀性氧化膜，这层氧化膜可以提高阻挡侵蚀性 Cl-渗透的能力，从而提高材料的耐蚀性。\n- (3) Sn、Sb 通过在 Cl-环境介质下的水合作用共同抑制了 $\\mathrm { F e } ^ { 3 + }$ 水解产生 H+的过程，改善腐蚀微区 pH值，缓解阳极溶解过程。\n- (4) Q450-Sn 和 Q450-Sn-Sb 耐候钢的锈层主要是 $\\mathrm { F e } _ { 3 } \\mathrm { O } _ { 4 } / \\gamma – \\mathrm { F e } _ { 2 } \\mathrm { O } _ { 3 }$ 、α-FeOOH、γ-FeOOH，Q450 在腐蚀中、后期锈层中出现了 β-FeOOH。钢中 Sn、Sn-Sb 的加入可以提高在\n\n锈层中起保护性作用的 α-FeOOH 含量比例，抑制了对锈层保护性不利的 β-FeOOH产生，提高了材料的耐蚀性。",
+      "从图 2 可知，图（a）中没有加 $\\mathrm { { { S n C l } } } _ { 2 }$ 时，阴极反应由析氢反应和氧还原反应共同控制，氧还原反应是典型的扩散控制的反应；而加入 $\\mathrm { { \\cal S n C l } } _ { 2 }$ 溶液后，阴极区出现明显的改变，即阴极随着电位的升高电流无明显变化。加入不同浓度的 $\\mathrm { { { S n C l } } } _ { 2 }$ 溶液，发现阳极进入活化溶解状态，最初遵循塔菲尔极化规律，但是随着电位的不断增大，阳极溶解电流密度急剧下降，当降低到一定程度时逐渐趋于稳定，出现了类似不锈钢的钝化现象，钝化膜的形成降低了腐蚀电流密度，然而由于其不规则几何表面动态变化或者是钝化膜的不完整性、不致密性导致当电位的再次升高时，电流密度再次随着电位的升高而急剧增大，阳极上的保护膜被完全破坏，阳极上发生新的反应。当加入的 $\\mathrm { { S n C l } } _ { 2 }$ 溶液的浓度到达一定程度时，会在电位达到某一个比较正的电极电位后，出现一个阳极电流密度迅速增大的“平台”，且随 $\\mathrm { { { S n C l } } } _ { 2 }$ 的浓度逐渐增大，出现的“平台”呈增大趋势。这表明 $\\mathrm { { { S n C l } } } _ { 2 }$ 对 Q235B 碳钢在 NaCl（pH=1）溶液中的阳极反应有抑制作用。图（b）通过加入不同浓度的 ${ \\mathrm { S b } } ^ { 3 + }$ 可发现，随着加入 $\\mathrm { S b } ^ { 3 + }$ 浓度的不断增大，阴极缓蚀效果呈现先增大后减小的变化过程，当加入量为 $2 . 5 { \\times } 1 0 ^ { - 4 } \\mathrm { \\ m o l S b } ^ { 3 + }$ 时，其阴极缓蚀效果达到最好。说明 ${ \\mathrm { S b } } ^ { 3 + }$ 对 Q235B 碳钢的阴极腐蚀过程有一定的抑制作用，对阳极没有明显缓蚀作用，所以 Sb 具有一定的阴极缓蚀效果。采用 Sn、Sb 混合溶液对 Q235B碳钢的电化学腐蚀行为进行研究时，选择 $5 \\times 1 0 ^ { - 4 } ~ \\mathrm { m o l } ~ \\mathrm { S n } ^ { 2 + } + 2 . 5 \\times 1 0 ^ { - 4 } ~ \\mathrm { m o l } ~ \\mathrm { S b } ^ { 3 + }$ 加入溶液中，分析其缓蚀效果。如图（c），可以看出 Sn、Sb 均加入后，Q235B碳钢的阴极和阳极腐蚀均出现抑制现象，并且与单独加入 Sn 的极化曲线相比较其曲线更加稳定。"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "在《Sn-Sb耐候钢在模拟高湿热海洋大气环境中的耐蚀性研究》中，实验材料是怎么制备的？",
+    "ground_truth": "采用50kg真空感应冶炼浇注成钢锭，锻造成120mm×120mm×30mm钢坯，轧制工艺为钢坯随炉升温至1200℃保温1h，经多道次轧制至6mm，水冷至550℃保温0.5h后空冷至室温。",
+    "ground_contexts": [
+      "实验室条件下采用 50kg真空感应冶炼浇注成钢锭，钢锭锻造成 $1 2 0 \\mathrm { m m } \\times 1 2 0 \\mathrm { m m } \\times 3 0$ mm钢坯。轧制工艺为：钢坯随炉升温至 $1 2 0 0 ~ ^ { \\circ } \\mathrm { C }$ ，保温 1h 后按照如下程序进行轧制，30 mm $1 1 0 0 \\ { ^ { \\circ } \\mathrm { C } } \\ 2 0 \\ { \\mathrm { m m } } \\ 1 0 0 0 \\ { ^ { \\circ } \\mathrm { C } } \\ 1 6 \\ { \\mathrm { m m } } \\ 9 0 0 \\ { ^ { \\circ } \\mathrm { C } } \\ 1 2 \\ { \\mathrm { m m } } - 8 \\ { \\mathrm { m m } } \\ 8 5 0 \\ { ^ { \\circ } \\mathrm { C } } \\ 6 \\ { \\mathrm { m m } } \\ .$ ，轧完后水冷至 $5 5 0 ~ ^ { \\circ } \\mathrm { C } .$ ，在 $5 5 0 ~ ^ { \\circ } \\mathrm { C }$ 保温炉中保温 0.5 h，最后取出空冷至室温。试验钢的化学成分如表 1，其中Q450NQR1（Q450）为某钢厂工业生产的耐候钢，Q450-Sn 和 Q450-Sn-Sb 是在 Q450NQR1基础上单独添加 Sn，复合添加 Sn、Sb 后在实验室条件下按上述冶炼、轧制工艺生产的试验钢。三种钢的金相组织如图 1 所示，均为铁素体+珠光体组织。",
+      "[Section] 1.1 实验材料\n[Caption] 表 1 3种实验钢的化学成分（%） Table 1 Chemical compositions of the three experiment steels（wt.%）\n[Table HTML]\n<table><tr><td>Steels</td><td>C</td><td>Si</td><td>Mn</td><td>P</td><td>S</td><td>Cr</td><td>Ni</td><td>Cu</td><td>Nb</td><td>Sn</td><td>Sb</td></tr><tr><td>Q450</td><td>0.075</td><td>0.39</td><td>0.80</td><td>0.012</td><td>0.007</td><td>0.50</td><td>0.19</td><td>0.24</td><td>0.035</td><td>-</td><td>-</td></tr><tr><td>Q450-Sn</td><td>0.073</td><td>0.40</td><td>0.86</td><td>0.010</td><td>0.007</td><td>0.51</td><td>0.20</td><td>0.26</td><td>0.032</td><td>0.31</td><td>-</td></tr><tr><td>Q450NQR1</td><td>0.074</td><td>0.36</td><td>0.79</td><td>0.011</td><td>0.006</td><td>0.53</td><td>0.19</td><td>0.25</td><td>0.033</td><td>0.32</td><td>0.12</td></tr></table>"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "图5显示了什么内容？",
+    "ground_truth": "图5是3种耐候钢腐蚀96h锈层截面SEM形貌，分别显示Q450、Q450-Sn、Q450-Sn-Sb的锈层截面特征。",
+    "ground_contexts": [
+      "[Section] 2.3锈层形貌\n[图片说明] 图 5 3 种耐候钢腐蚀 96 h 锈层截面 SEM 形貌(a)Q450， (b)Q450-Sn， (c)Q450-Sn-Sb Fig.5 SEM micrographs of cross-section rust layer at 96h for(a) Q450 (b) Q450-Sn (c) Q450-Sn-Sb",
+      "选取上述 3 种耐候钢经腐蚀 96 h 后的表面锈层进行 SEM 观察，如图 5 所示。图 5(a)是 Q450 的锈层截面形貌，在贴近基体处出现连续、贯穿的裂纹，锈层在镶嵌过程渗有少量环氧树脂，远离基体处锈层有较大空洞，整个锈层疏松、易脱落，厚度大约有 350μm。添加 Sn 后 Q450-Sn的锈层变薄，约为 300 μm，锈层与基体连接处明显变得致密，但还存在少量的纵向裂缝和小的空洞。Q450-Sn-Sb的锈层厚度与Q450-Sn无较大变化，但是锈层-基体处更完整、几乎无裂纹或空洞，且锈层-基体结合处平缓（图中白色虚线），远离基体端的锈层主要存在横向裂纹。3 种钢锈层截面 SEM 形貌的不同特征反映了锈层与基体的粘附性和致密性，表明添加 Sn、Sb能明显改善锈层的致密性和连续性。"
+    ],
+    "query_type": "metadata_fig"
+  },
+  {
+    "question": "表2中Q450-Sn-Sb在96h时α-FeOOH的质量分数是多少？",
+    "ground_truth": "26.5%。",
+    "ground_contexts": [
+      "[Section] 2.4锈层物相\n[Caption] 表 2 各试样不同腐蚀周期锈层物相的半定量分析结果（质量百分数%） Table 2 Corresponding mass fraction of different phases in rust layers(wt.%)\n[Table HTML]\n<table><tr><td rowspan=\"2\">Type</td><td colspan=\"3\">Q450</td><td colspan=\"3\">Q450-Sn</td><td colspan=\"3\">Q450-Sn-Sb</td></tr><tr><td>24 h</td><td>48 h</td><td>96 h</td><td>24 h</td><td>48 h</td><td>96 h</td><td>24 h</td><td>48 h</td><td>96 h</td></tr><tr><td> $Fe_3O_4/\\gamma-Fe_2O_3$ </td><td>91.6</td><td>79.8</td><td>61.4</td><td>86.7</td><td>78.3</td><td>65.8</td><td>88.3</td><td>74.9</td><td>56.4</td></tr><tr><td>α-FeOOH</td><td>-</td><td>-</td><td>7.3</td><td>4.7</td><td>8.4</td><td>19.2</td><td>6.9</td><td>14.4</td><td>26.5</td></tr><tr><td>γ-FeOOH</td><td>8.4</td><td>13.7</td><td>16.6</td><td>8.6</td><td>13.3</td><td>15.0</td><td>4.8</td><td>10.7</td><td>19.1</td></tr><tr><td>β-FeOOH</td><td>-</td><td>6.5</td><td>14.7</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr></table>"
+    ],
+    "query_type": "metadata_fig"
+  },
+  {
+    "question": "这篇文献主要研究了什么内容？",
+    "ground_truth": "Ti 微合金化高强耐候钢的成分设计研究",
+    "ground_contexts": [
+      "Ti微合金化高强耐候钢的成分设计研究_GDKL201311003209",
+      "陈学文 $^{1}$ ，毛新平 $^{2}$ ，李烈军 $^{1}$ ，钟志永 $^{1}$ ，庄汉洲 $^{1}$ ，许传芬 $^{1}$ 1. 广钢集团技术中心 CSP 应用技术研究所，广州 510730；2. 广州珠江钢铁有限责任公司，广州 510730微合金化元素在钢中由于起到固溶、偏聚和沉淀作用，尤其是微合金化元素与碳、氮交互作用，产生了晶粒细化、析出强化、再结晶控制、夹杂物该性等一系列作用，这些因素对钢的强韧化起的作用被广泛应用在钢铁产品中。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "总结一下这篇论文的核心贡献是什么",
+    "ground_truth": "确定了 Ti 微合金化高强耐候钢的 Ti 含量范围在 0.04%~0.14%，并应用于生产实践中",
+    "ground_contexts": [
+      "综合上述分析结果，结合珠钢薄板坯连铸连轧生产线生产普通集装箱板的具体情况和用户对不同强度耐候钢的需求，确定Ti微合金化高强耐候钢的Ti含量范围在0.04%~0.14%。综合考虑沉淀强化和细晶强化的作用，根据不同强度选择Ti微合金化高强耐候钢的Ti含量分别为0.05%~0.08%、0.08%~0.12%、0.12%~0.14%等区间，目的是为了考察不同Ti含量对高强耐候钢强度的影响。具体的成分设计如表1所示。",
+      "基于薄板坯连铸连轧工艺产品组织性能的特点，采用 Cu-P-Cr-Ni 系列耐候钢生产技术和 Ti 微合金化技术，以 JIS G3125 的 SPA-H（集装箱板）的成分为基础，设计出了屈服强度大于 450～700MPa 的各强度级别高强耐候钢的最佳 Ti 含量范围，分别为 0.05%～0.08%，0.08%～0.12%，0.12%～0.14%，满足了高强耐候钢的强度要求并应用于生产实践中。"
+    ],
+    "query_type": "summary"
+  },
+  {
+    "question": "为什么选择 Ti 而不是 Nb 或 V 作为微合金化元素？",
+    "ground_truth": "铌铁、钒铁的价格比 Ti 铁贵 10 倍以上，且我国氧化钛储量丰富，占世界总储量的 45.6%",
+    "ground_contexts": [
+      "钢中常用的微合金元素有 Nb、V 和 Ti。比较 Nb、V、Ti 这三种微合金元素，铌铁、钒铁的价格目前在市场上比 Ti 铁贵 10 倍以上，而且还有不断升价的趋势。其次我国氧化钛的储量为 6.3 亿吨，几乎占世界总储量的 45.6%，资源非常丰富。",
+      "陈学文 $^{1}$ ，毛新平 $^{2}$ ，李烈军 $^{1}$ ，钟志永 $^{1}$ ，庄汉洲 $^{1}$ ，许传芬 $^{1}$ 1. 广钢集团技术中心 CSP 应用技术研究所，广州 510730；2. 广州珠江钢铁有限责任公司，广州 510730微合金化元素在钢中由于起到固溶、偏聚和沉淀作用，尤其是微合金化元素与碳、氮交互作用，产生了晶粒细化、析出强化、再结晶控制、夹杂物该性等一系列作用，这些因素对钢的强韧化起的作用被广泛应用在钢铁产品中。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "高强耐候钢的成分设计中，碳含量应该控制在多少？",
+    "ground_truth": "控制 C ≤ 0.06%，避开碳含量的包晶区",
+    "ground_contexts": [
+      "EAF-CSP 流程上采用 Ti 微合金化技术生产高强耐候钢在成分设计上一是要避开碳含量的包晶区 $[C: 0.08\\% \\sim 0.16\\%]$ ，二是要严格控制 O，S 及 N 的含量，三是选择合适的 Ti 含量。",
+      "避开碳含量的包晶区根本措施就是控制 $C \\leqslant 0.06\\%$ ，可以保证生产顺行不漏钢，降低纵裂纹的发生几率，同时又可保证铸坯的表面质量及产品的力学性能。对薄板坯连铸连轧流程，能够确保氧含量低，容易控制保证钢水的纯洁度使目标 $S \\leqslant 0.005\\%$ ， $N \\leqslant 0.007\\%$ 。关键就是如何选择合适的 Ti 含量。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "生产这种钢采用的是什么样的工艺流程？",
+    "ground_truth": "EAF-CSP 流程，薄板坯连铸连轧",
+    "ground_contexts": [
+      "EAF-CSP 流程上采用 Ti 微合金化技术生产高强耐候钢在成分设计上一是要避开碳含量的包晶区 $[C: 0.08\\% \\sim 0.16\\%]$ ，二是要严格控制 O，S 及 N 的含量，三是选择合适的 Ti 含量。",
+      "基于薄板坯连铸连轧工艺产品组织性能的特点，采用 Cu-P-Cr-Ni 系列耐候钢生产技术和 Ti 微合金化技术，以 JIS G3125 的 SPA-H（集装箱板）的成分为基础，设计出了屈服强度大于 450～700MPa 的各强度级别高强耐候钢的最佳 Ti 含量范围，分别为 0.05%～0.08%，0.08%～0.12%，0.12%～0.14%，满足了高强耐候钢的强度要求并应用于生产实践中。"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "不同强度级别的耐候钢，Ti 含量是怎么分配的？",
+    "ground_truth": "分别为 0.05%~0.08%、0.08%~0.12%、0.12%~0.14% 等区间",
+    "ground_contexts": [
+      "综合上述分析结果，结合珠钢薄板坯连铸连轧生产线生产普通集装箱板的具体情况和用户对不同强度耐候钢的需求，确定Ti微合金化高强耐候钢的Ti含量范围在0.04%~0.14%。综合考虑沉淀强化和细晶强化的作用，根据不同强度选择Ti微合金化高强耐候钢的Ti含量分别为0.05%~0.08%、0.08%~0.12%、0.12%~0.14%等区间，目的是为了考察不同Ti含量对高强耐候钢强度的影响。具体的成分设计如表1所示。",
+      "[Section] Ti 微合金化高强耐候钢的成分设计研究\n[Caption] 表 1 试制钢的成分设计 (wt%)\n[Table HTML]\n<table><tr><td>牌号</td><td>C</td><td>Si</td><td>Mn</td><td>P</td><td>S</td><td>Cu</td></tr><tr><td>ZJ500N</td><td> $\\leqslant 0.06$ </td><td>0.35~0.42</td><td>0.40~0.50</td><td>0.07~0.10</td><td> $\\leqslant 0.005$ </td><td>0.25~0.29</td></tr><tr><td>ZJ600N</td><td> $\\leqslant 0.06$ </td><td>0.35~0.42</td><td>0.40~0.50</td><td>0.07~0.10</td><td> $\\leqslant 0.005$ </td><td>0.25~0.29</td></tr><tr><td>ZJ700N</td><td> $\\leqslant 0.06$ </td><td>0.35~0.42</td><td>0.40~0.50</td><td>0.07~0.10</td><td> $\\leqslant 0.005$ </td><td>0.25~0.29</td></tr><tr><td>牌号</td><td>Ni</td><td>Cr</td><td>Ti</td><td>Al (s)</td><td>Al (t)</td><td></td></tr><tr><td>ZJ500N</td><td>0.18~0.22</td><td>0.40~0.45</td><td>0.05~0.08</td><td>0.020~0.030</td><td>0.025~0.035</td><td></td></tr><tr><td>ZJ600N</td><td>0.18~0.22</td><td>0.40~0.45</td><td>0.08~0.12</td><td>0.020~0.030</td><td>0.025~0.035</td><td></td></tr><tr><td>ZJ700N</td><td>0.18~0.22</td><td>0.40~0.45</td><td>0.12~0.14</td><td>0.020~0.030</td><td>0.025~0.035</td><td></td></tr></table>"
+    ],
+    "query_type": "progressive"
+  },
+  {
+    "question": "这篇文献里提到的高强耐候钢主要用在哪里？",
+    "ground_truth": "特种集装箱及高速火车车箱、半挂车的制造",
+    "ground_contexts": [
+      "高强耐候钢是指屈服强度大于 450MPa 的耐候钢，这类钢在特种集装箱及高速火车车箱、半挂车的制造上有着广阔的应用前景。考虑到资源、生产成本及今后高强耐候钢的市场竞争力，拟开发的高强耐候钢选择了 Ti 微合金化技术进行生产。",
+      "基于薄板坯连铸连轧工艺产品组织性能的特点，采用 Cu-P-Cr-Ni 系列耐候钢生产技术和 Ti 微合金化技术，以 JIS G3125 的 SPA-H（集装箱板）的成分为基础，设计出了屈服强度大于 450～700MPa 的各强度级别高强耐候钢的最佳 Ti 含量范围，分别为 0.05%～0.08%，0.08%～0.12%，0.12%～0.14%，满足了高强耐候钢的强度要求并应用于生产实践中。"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "上面这篇论文基于什么标准设计的成分？",
+    "ground_truth": "以 JIS G3125 的 SPA-H（集装箱板）的成分为基础",
+    "ground_contexts": [
+      "基于薄板坯连铸连轧工艺产品组织性能的特点，采用 Cu-P-Cr-Ni 系列耐候钢生产技术和 Ti 微合金化技术，以 JIS G3125 的 SPA-H（集装箱板）的成分为基础，设计出了屈服强度大于 450～700MPa 的各强度级别高强耐候钢的最佳 Ti 含量范围，分别为 0.05%～0.08%，0.08%～0.12%，0.12%～0.14%，满足了高强耐候钢的强度要求并应用于生产实践中。",
+      "EAF-CSP 流程上采用 Ti 微合金化技术生产高强耐候钢在成分设计上一是要避开碳含量的包晶区 $[C: 0.08\\% \\sim 0.16\\%]$ ，二是要严格控制 O，S 及 N 的含量，三是选择合适的 Ti 含量。"
+    ],
+    "query_type": "local"
+  },
+  {
+    "question": "表 1 中 ZJ700N 牌号的 Ti 含量范围是多少？",
+    "ground_truth": "0.12~0.14%",
+    "ground_contexts": [
+      "[Section] Ti 微合金化高强耐候钢的成分设计研究\n[Caption] 表 1 试制钢的成分设计 (wt%)\n[Table HTML]\n<table><tr><td>牌号</td><td>C</td><td>Si</td><td>Mn</td><td>P</td><td>S</td><td>Cu</td></tr><tr><td>ZJ500N</td><td> $\\leqslant 0.06$ </td><td>0.35~0.42</td><td>0.40~0.50</td><td>0.07~0.10</td><td> $\\leqslant 0.005$ </td><td>0.25~0.29</td></tr><tr><td>ZJ600N</td><td> $\\leqslant 0.06$ </td><td>0.35~0.42</td><td>0.40~0.50</td><td>0.07~0.10</td><td> $\\leqslant 0.005$ </td><td>0.25~0.29</td></tr><tr><td>ZJ700N</td><td> $\\leqslant 0.06$ </td><td>0.35~0.42</td><td>0.40~0.50</td><td>0.07~0.10</td><td> $\\leqslant 0.005$ </td><td>0.25~0.29</td></tr><tr><td>牌号</td><td>Ni</td><td>Cr</td><td>Ti</td><td>Al (s)</td><td>Al (t)</td><td></td></tr><tr><td>ZJ500N</td><td>0.18~0.22</td><td>0.40~0.45</td><td>0.05~0.08</td><td>0.020~0.030</td><td>0.025~0.035</td><td></td></tr><tr><td>ZJ600N</td><td>0.18~0.22</td><td>0.40~0.45</td><td>0.08~0.12</td><td>0.020~0.030</td><td>0.025~0.035</td><td></td></tr><tr><td>ZJ700N</td><td>0.18~0.22</td><td>0.40~0.45</td><td>0.12~0.14</td><td>0.020~0.030</td><td>0.025~0.035</td><td></td></tr></table>",
+      "综合上述分析结果，结合珠钢薄板坯连铸连轧生产线生产普通集装箱板的具体情况和用户对不同强度耐候钢的需求，确定Ti微合金化高强耐候钢的Ti含量范围在0.04%~0.14%。综合考虑沉淀强化和细晶强化的作用，根据不同强度选择Ti微合金化高强耐候钢的Ti含量分别为0.05%~0.08%、0.08%~0.12%、0.12%~0.14%等区间，目的是为了考察不同Ti含量对高强耐候钢强度的影响。具体的成分设计如表1所示。"
+    ],
+    "query_type": "metadata_entity"
+  },
+  {
+    "question": "正文里哪里提到了硫含量的控制目标？",
+    "ground_truth": "目标 S ≤ 0.005%",
+    "ground_contexts": [
+      "避开碳含量的包晶区根本措施就是控制 $C \\leqslant 0.06\\%$ ，可以保证生产顺行不漏钢，降低纵裂纹的发生几率，同时又可保证铸坯的表面质量及产品的力学性能。对薄板坯连铸连轧流程，能够确保氧含量低，容易控制保证钢水的纯洁度使目标 $S \\leqslant 0.005\\%$ ， $N \\leqslant 0.007\\%$ 。关键就是如何选择合适的 Ti 含量。",
+      "EAF-CSP 流程上采用 Ti 微合金化技术生产高强耐候钢在成分设计上一是要避开碳含量的包晶区 $[C: 0.08\\% \\sim 0.16\\%]$ ，二是要严格控制 O，S 及 N 的含量，三是选择合适的 Ti 含量。"
+    ],
+    "query_type": "metadata_entity"
+  }
+]

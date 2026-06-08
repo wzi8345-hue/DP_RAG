@@ -1,0 +1,620 @@
+# DP-RAG Pipeline 默认配置
+# 所有硬编码值集中在此, 运行时可通过 --config 指定自定义配置覆盖
+# 任何 ${VAR} 占位符都会被同名环境变量替换; 缺失时退化为空串并打 WARNING
+
+# ── PDF 解析后端选择 ───────────────────────────────────────────────────
+# 支持两条解析支路, 任选其一:
+#   mineru    : MinerU (https://mineru.net) — 现有默认, 输出 content_list_v2.json,
+#               走现有 chunker (pipeline/processors/chunker.py).
+#   uniparser : UniParser (https://uniparser.dp.tech) — 新增支路, 输出
+#               uniparser_result.json (含 content/objects/pages_dict/pages_tree),
+#               需要后续根据其 schema 单独制定 chunk 策略 (待办).
+# CLI 可用 `python -m pipeline.run --parser uniparser <cmd>` 覆盖此值.
+parsing:
+  backend: "mineru"
+
+# ── MinerU API (PDF 解析) ──────────────────────────────────────────────
+mineru:
+  api_url: "https://mineru.net/api/v4/file-urls/batch"
+  # 推荐放环境变量: export MINERU_AUTHORIZATION="Bearer xxx"
+  authorization: "${MINERU_AUTHORIZATION}"
+  model_version: "vlm"
+  output_dir: "mineru_result"
+  poll:
+    max_retries: 120
+    interval: 5
+
+# ── UniParser API (PDF 解析: MinerU 之外的支路) ───────────────────────
+# 文档: https://uniparser.dp.tech/api
+# 调用流程:
+#   1) POST /trigger-file-async (multipart) 上传 PDF + 解析配置, 默认 sync=true
+#      会等待解析完成再返回.
+#   2) POST /get-formatted (JSON) 拿格式化结果, 默认把 content/objects/
+#      pages_dict/pages_tree 全开, 留给下游 chunker 自由挑选.
+# 产物: <output_dir>/<pdf_stem>/uniparser_result.json + uniparser_meta.json
+uniparser:
+  host: "https://uniparser.dp.tech/"
+  # 推荐放环境变量: export UNIPARSER_API_KEY="..."
+  api_key: "${UNIPARSER_API_KEY}"
+  output_dir: "uniparser_result"
+  sync: true                      # 提交时是否同步等待解析完成 (小文件推荐 true)
+  request_timeout: 1800           # 单次 HTTP 超时秒数 (sync=true 时官方默认 1800)
+  poll:
+    max_retries: 120              # sync=false (或 sync 返回空) 时的轮询次数
+    interval: 10                   # 轮询间隔 (秒)
+  # 解析阶段 SemanticType -> ParseMode:
+  #   0=禁用 / 1=OCRFast / 2=OCRHighQuality / -1=DumpBase64
+  #   textual 还支持 3 (DigitalExported, 数字原生 PDF 直接抽文字)
+  #   chart / expression / molecule 目前无 2 (high quality) 模式
+  parse_modes:
+    textual: "2"
+    equation: "2"
+    table: "2"
+    chart: "-1"
+    figure: "-1"
+    expression: "-1"
+    molecule: "1"
+  # 结果获取阶段的输出开关 (默认全开, 方便下游 chunker 探索 schema)
+  output_flags:
+    content: true                 # 格式化全文 (字符串)
+    objects: true                 # 扁平语义块列表 (含 class / bbox / page)
+    pages_dict: true              # 按页扁平布局 list[list[dict]]
+    pages_tree: true              # 按页树形布局 (保留父子层级)
+    molecule_source: false
+    marginalia: true
+  # 各 SemanticType 的格式化输出: plain / markup / markdown / latex / html
+  format_flags:
+    textual: "markdown"
+    table: "markdown"
+    equation: "latex"
+    molecule: "markdown"
+    chart: "markdown"
+    figure: "html"
+    expression: "markdown"
+
+# ── 分块 (chunker) ─────────────────────────────────────────────────────
+# 默认按 title 整合段落为一个 chunk; 超过 semantic_split.max_chars 的 section
+# 走基于句子嵌入相似度 + 百分位阈值的二次切分 (semantic_splitter.py)
+chunking:
+  summary_title_count: 1           # (兼容字段) 现在已不使用, 保留以避免老配置报错
+  summary_sim_threshold: 2       # (兼容字段) 等价于 summary.embedding.threshold; 见下方 summary 子表
+  content_list_path: null          # null = 自动发现 mineru_result 下最新的 content_list_v2.json
+  output_path: "knowledge_blocks.json"
+  # ── 摘要 (summary) 强信号检测: 多级 fallback, 优先级由上到下, 命中即定 ──
+  # tier 1   : 字面强匹配 (section title regex)              — 命中即定
+  # tier 1.5 : 段首关键词提升 (text chunk content 开头 regex) — post-process 跑
+  # tier 2   : BM25 关键词匹配 (section title)               — bm25.threshold 过线
+  # tier 3   : dense 向量相似度                              — embedding.threshold 过线
+  # tier 4   : LLM 兜底合成 (前 N 页正文 → 新摘要)            — enabled 才跑
+  # 任何一级命中后, 后续级别不再触发. 各级日志会标注命中策略 (rule/promote/bm25/embedding/llm).
+  # 默认: tier 1 + 1.5 + 2 开 / tier 3 + 4 关 (用户反馈 embedding 没用 + LLM 不兜底).
+  summary:
+    enabled: true
+    max_summary_sections: 1        # 一篇文献最多保留多少个 summary chunk
+    # ── tier 1: 字面强匹配 (regex 全部命中 section title, 任一命中即视为强信号) ──
+    title_patterns:
+      - "(?i)\\babstract\\b"
+      - "(?i)\\bexecutive\\s+summary\\b"
+      - "(?i)\\bsynopsis\\b"
+      - "(?i)\\bsummary\\b"
+      - "(?i)\\boverview\\b"
+      - "(?i)\\btl;?\\s*dr\\b"
+      - "摘\\s*要"
+      - "概\\s*要"
+      - "提\\s*要"
+      - "梗\\s*概"
+    # ── tier 1.5: 段首关键词提升 — 用同一组 text_patterns ──
+    # 处理 PDF 没有显式 section title 但 content 段首是 "摘要：本文..." 的真实 case.
+    # 命中后该 text chunk 被 promote 为 summary, 剥前缀 + clip 尾部 (用 stop_patterns).
+    text_patterns:
+      - "(?i)\\babstract\\b\\s*[:：\\-]?"
+      - "(?i)\\bsummary\\b\\s*[:：\\-]?"
+      - "(?i)\\bexecutive\\s+summary\\b\\s*[:：\\-]?"
+      - "摘\\s*要\\s*[:：\\-]?"
+      - "概\\s*要\\s*[:：\\-]?"
+      - "提\\s*要\\s*[:：\\-]?"
+    # 摘要正文里出现这些"下一节"标志时, 用来 clip 摘要尾部 (剥掉关键词 / introduction)
+    stop_patterns:
+      - "(?i)\\bkeywords?\\b\\s*[:：]"
+      - "关\\s*键\\s*词\\s*[:：]"
+      - "(?i)\\b\\d+(?:\\.\\d+)*\\s+(?:introduction|background)\\b"
+      - "^\\s*(?:引言|前言)\\s*$"
+    # ── tier 2: BM25 (零依赖, 50 行实现, 不依赖 Milvus) 在所有 section title 上跑 ──
+    bm25:
+      enabled: true
+      query_texts:                 # 每条 query 跑一次 BM25, 取 max 分作为该 title 的最终得分
+        - "abstract"
+        - "summary"
+        - "overview"
+        - "executive summary"
+        - "摘要"
+        - "概要"
+      threshold: 0.7               # max BM25 分 ≥ threshold 视为强信号 (典型范围 0.3-1.5)
+    # ── tier 3: 向量相似度 (默认关; 用户反馈 "embedding 没什么用, 关键词都在 content 中") ──
+    embedding:
+      enabled: false               # 默认 false; 想用的话开 true + 配 embedding API
+      query_texts:
+        - "abstract 摘要"
+        - "summary conclusion 总结 结论"
+        - "overview introduction 综述 引言 概述"
+      threshold: 2                 # title 与三组 query 的 cosine 之和 ≥ threshold 即命中
+    # ── tier 4: LLM 兜底 (默认关; 用户要求 "都没办法采用 LLM 兜底") ──
+    llm:
+      enabled: true               # tier 1-3 都 miss 时是否调 LLM 合成摘要
+      max_input_chars: 6000        # 喂给 LLM 的第一页正文截断长度 (字符)
+      # 连接参数: 留 null 表示复用 generation.* (api_base / model / api_key / timeout / max_retries)
+      api_base: null
+      model: null
+      api_key: null
+      timeout: null
+      max_retries: null
+      # chat/completions 调用参数 (disable_thinking* 留 null 同样回退 generation)
+      temperature: 0.0
+      max_tokens: 1024             # 摘要输出 token 上限; Qwen3 等思考模型建议 ≥1024
+      disable_thinking: null       # null → generation.disable_thinking (默认 true)
+      disable_thinking_extra_body: null  # null → generation.disable_thinking_extra_body
+      # prompt 覆盖 (留 null 使用 chunker 内置默认)
+      system_prompt: null
+      user_prompt_template: null   # 可用 {first_page_text} 占位符
+  semantic_split:                  # 长 chunk 的语义二次切分参数
+    # 注意: target_chars 必须 < max_chars, 否则百分位断点永远触发不到 (退化成硬切)
+    target_chars: 1200             # 期望每个子 chunk 的大小 (size_unit 单位)
+    max_chars: 2000                # 硬上限; 超过则强制切 (size_unit 单位)
+    min_chars: 300                 # 子 chunk 太短 -> 与下一块合并 (size_unit 单位)
+    breakpoint_percentile: 85      # 取相邻句子距离分布的第 N 百分位作为断点阈值
+    size_unit: char                # char | token; token 用 CJK-aware 估算, 让中英混排块更均匀
+    overlap: 0                     # 相邻子块按"句子边界"做 overlap 的大小 (size_unit 单位); 0=关闭
+    # token 模式示例 (中英混排更一致, 取消注释并按需调整):
+    #   target_chars: 320
+    #   max_chars: 512
+    #   min_chars: 80
+    #   size_unit: token
+  references_batch_size: 5         # MinerU 支路: 每个 references chunk 聚合多少条引用
+  # UniParser 支路专属 chunker 参数 (仅 backend=uniparser 时生效)
+  uniparser:
+    min_conf: 0.5                  # block.conf 低于此阈值的直接丢 (含错位/噪音)
+    references_batch_size: 5       # 每个 references chunk 聚合多少条引用
+    # chunker 用的 block 数据源:
+    #   "pages_dict" (默认): 按页扁平 layout, image chunk 用 imagecaption 锚点去重
+    #   "pages_tree":        树形 layout, DFS 摊平时保留 group_id, 同一 figuregroup
+    #                        永远只出 1 个 image chunk (即便 group 含 2 个 imagecaption
+    #                        或 0 个 caption). 切到这个值后, 请确认 uniparser API 调用
+    #                        时开了 output_flags.pages_tree: true (否则会自动回退).
+    source: "pages_dict"
+
+# ── 向量化 (vectorizer + embedding client) ────────────────────────────
+embedding:
+  api_base: "http://localhost:8002/v1"
+  model: "/models/Qwen3-Embedding-4B"
+  # export EMBED_API_KEY="..."
+  api_key: "EMPTY"
+  batch_size: 16
+  max_chars: 8000
+  timeout: 120
+  max_retries: 3
+  # COSINE metric 时建议 true: 客户端 L2 归一化, 与 Milvus COSINE 一致
+  normalize: true
+  # Qwen3-Embedding: 仅检索 query 侧加 instruct (document 入库不加)
+  query_instruct:
+    enabled: true
+    instructs:
+      summary: "Given a research topic query, retrieve relevant paper summaries and titles that discuss this topic"
+      passage: "Given a scientific question, retrieve relevant passages from research papers that answer the question"
+      entity: "Given an entity or technical term, retrieve passages that mention this entity"
+  input_path: "knowledge_blocks.json"
+  output_path: "knowledge_blocks_vec.json"
+
+# ── Milvus 存储 ────────────────────────────────────────────────────────
+# v4 schema (在 v3 基础上新增 paragraph_index 字段):
+#   - 升级 v3 -> v4 用 `python -m pipeline.run rebuild <mineru_dir>` (会清库重灌)
+#   - 增量灌入新文献用 `python -m pipeline.run append <mineru_dir>` (不清库)
+# recreate 字段已不再被 CLI 使用 (rebuild/append 命令名说了算), 仅保留给
+# 直接用 `step store` 单步调用的高级用户; 默认 false 以避免误删数据.
+milvus:
+  # ── 后端选择 (二选一) ────────────────────────────────────────────────
+  # lite   : 嵌入式 Milvus Lite, 单文件数据库, 走本地 SQLite 引擎
+  #          适合本机开发 / 小规模数据 (< 1M 条), 零运维
+  # server : 远程 Milvus 服务 (如本机 docker-compose 起的 http://localhost:19530)
+  #          支持完整分布式特性 (load_collection / 集群索引 / 多 db / RBAC)
+  # 运行时可用 CLI 覆盖: `python -m pipeline.run --milvus-backend server <cmd>`
+  backend: "server"
+  lite:
+    uri: "./milvus_lite.db"
+    token: ""
+  server:
+    # 注意: 不能再用 .db 结尾的文件路径, 必须是 http(s):// 或 grpc:// 形式
+    uri: "http://localhost:19530"
+    token: ""                      # 启用 RBAC 时: "username:password" 或 API key
+    db_name: ""                    # 多 db 实例时指定; 留空使用默认 db
+  # ── 顶层 uri/token: 已弃用, 保留作为 lite/server 子节缺失时的兜底 ────────
+  uri: "./milvus_lite.db"
+  token: ""
+  # ── 集合相关 (lite/server 共享) ────────────────────────────────────────
+  collection: "literature_chunks"
+  # 必须与 embedding 模型的输出维度严格一致, 否则 Milvus 会报
+  # "vector dimension mismatch, expected vector size(byte) X, actual Y"
+  # 常见模型对应维度:
+  #   Qwen3-Embedding-0.6B -> 1024
+  #   Qwen3-Embedding-4B   -> 2560
+  #   Qwen3-Embedding-8B   -> 4096
+  #   BGE-M3 / bge-large   -> 1024
+  # 改动 dim 后, 现有 Milvus 集合必须 rebuild (drop + recreate), Milvus 不支持原地改维度.
+  dim: 2560
+  batch_size: 100
+  recreate: false                  # rebuild / append 命令会显式覆盖此值
+  input_path: "knowledge_blocks_vec.json"
+  doc_id: null                     # null = 从 sidecar / 文件名 / chunk content 推断
+  doc_name: null
+  # gRPC keepalive: Milvus Lite 默认 20s 心跳太频繁, 触发 too_many_pings
+  keepalive_time_ms: 300000        # 心跳间隔 (ms), 5 分钟
+  keepalive_timeout_ms: 60000      # 心跳超时 (ms)
+  bm25:
+    analyzer:
+      type: "chinese"              # jieba 分词, 适配中英混排; 可选 "english" / 自定义
+  index:
+    # 稠密向量索引
+    # AUTOINDEX: Lite -> FLAT, 集群 -> HNSW; 零运维
+    # HNSW    : params 例 {M: 16, efConstruction: 200}; 适合 < 1M 量级
+    # IVF_FLAT: params 例 {nlist: 1024}; 适合更大数据量
+    dense_type: "AUTOINDEX"
+    dense_metric: "COSINE"             # IP (内积, 配合 normalize=true 等价 cosine) / L2 / COSINE
+    dense_params: {}               # HNSW: {M:16, efConstruction:200}; IVF: {nlist:1024}
+
+# ── 检索 ───────────────────────────────────────────────────────────────
+retrieval:
+  mode: "hybrid"                   # hybrid (dense+bm25) / vector / bm25 / metadata
+  top_k: 8
+  rrf_k: 60
+  per_retriever_k: 15              # hybrid 每路召回上限 (原 10 → 15, 给 rerank 更多候选)
+  dense_weight: 0.7                # hybrid RRF 中 dense 的权重 (static 模式 / 构建默认值)
+  bm25_weight: 0.3                 # hybrid RRF 中 bm25 的权重
+  doc_id: null
+  chunk_type: null                 # null / text / table / image
+  # ── Hybrid 权重 (#14): router 输出 retrieve_bias → 分阶段映射 ──
+  hybrid:
+    mode: router                  # router=读 RouteDecision.retrieve_bias | static=固定权重
+    static_dense_weight: 0.7
+    static_bm25_weight: 0.3
+    bias_profiles:
+      balanced:
+        progressive_l1:       { dense: 0.65, bm25: 0.35 }
+        progressive_l1_global: { dense: 0.50, bm25: 0.50 }
+        progressive_l2:         { dense: 0.55, bm25: 0.45 }
+        local_l2:               { dense: 0.45, bm25: 0.55 }
+        simple:                 { dense: 0.60, bm25: 0.40 }
+      semantic:
+        progressive_l1:       { dense: 0.75, bm25: 0.25 }
+        progressive_l1_global: { dense: 0.60, bm25: 0.40 }
+        progressive_l2:         { dense: 0.65, bm25: 0.35 }
+        local_l2:               { dense: 0.55, bm25: 0.45 }
+        simple:                 { dense: 0.70, bm25: 0.30 }
+      entity_heavy:
+        progressive_l1:       { dense: 0.50, bm25: 0.50 }
+        progressive_l1_global: { dense: 0.35, bm25: 0.65 }
+        progressive_l2:         { dense: 0.40, bm25: 0.60 }
+        local_l2:               { dense: 0.30, bm25: 0.70 }
+        simple:                 { dense: 0.45, bm25: 0.55 }
+      keyword:
+        progressive_l1:       { dense: 0.55, bm25: 0.45 }
+        progressive_l1_global: { dense: 0.40, bm25: 0.60 }
+        progressive_l2:         { dense: 0.45, bm25: 0.55 }
+        local_l2:               { dense: 0.35, bm25: 0.65 }
+        simple:                 { dense: 0.50, bm25: 0.50 }
+    clamp: [0.25, 0.85]
+  # ── Summary 文献发现路径 (有没有/哪些/列文献) ──
+  summary:
+    top_docs: 15                      # 最终保留文献数 (SummaryRetriever top_k_docs)
+    per_query_k: 10                    # summary/title 池 vector/bm25 各路召回上限
+    # 若 top_docs > reranker.top_k, 精排仍会截到 reranker.top_k; 需同步调 langgraph.reranker.top_k
+  # ── Progressive 两级检索 (#9) ──
+  progressive:
+    level1_mode: hybrid
+    level1_per_retriever_k: 5          # L1: vector/bm25 各 top-5 doc → 合并
+    l2_per_path_k: 15                  # L2: 每路 top-15 chunk (原 10)
+    l2_max_candidate_docs: 10          # L1 合并 doc 上限
+    l2_drill_min_score: 0.8           # 合并 doc 内探测: 双路 top-1 平均分 ≥ 此值 → doc-scoped L2
+    enable_global_chunk_fallback: true  # 低置信 → 全库 chunk 双路 top-10
+    structural_skip_summary_l1: true
+    # ── 内容池分离 (v7): 正文 {text,equation} 与图表 {image,table} 分池召回 ──
+    # 图表 caption 短、emb 分常偏高, 混池会挤占正文 gold 名额 → 散文型事实问题召回偏低。
+    # 分池后正文独立配额, 图表仅保留 structural_content_top_k 条再交 reranker。
+    split_content_pool: true
+    structural_content_top_k: 2        # 图表池 (image/table) 召回上限; 0=不召回图表
+    # ── 实验性开关 (默认 false; 关闭时检索与历史完全一致, 开启后重跑评测对比) ──
+    experimental_grade_entity_bias: true  # A3: query 含钢牌号时, L1 前置真正含该牌号的文献
+    experimental_l2_drop_nav: true        # B1: L2 过滤 summary/Abstract/摘要/Keywords/关键词 导航块
+    # 以下已废弃, 保留兼容
+    level1_min_docs: 2
+    doc_confidence_threshold: 0.05
+    enable_bm25_summary_fallback: true
+    l1_chunk_probe_k: 20
+    global_fallback_top_k: 20
+    global_fallback_per_retriever_k: 10
+    l2_narrow_top_docs: 5
+    strong_signal_ratio: 1.5
+    enable_probe_short_circuit: true
+  search:
+    # 检索时的 search_params, 与 milvus.index.dense_type 对应
+    # HNSW: {ef: 64} 大 -> 召回↑ 延迟↑
+    # IVF*: {nprobe: 10}
+    # AUTOINDEX: {} 留空
+    dense: {ef: 128}               # HNSW search ef; 64→128 提升 dense 召回 (略增延迟)
+    bm25:
+      drop_ratio_search: 0.0       # 0~1, 大 -> 丢弃低权重 token, 性能↑ 召回↓
+  context:
+    # AgenticContextBuilder 拼接上下文时的硬上限, 防止 prompt token 失控
+    max_total_chars: 24000         # 整个 context 上限 (≈ 6k tokens)
+    per_route_chars: 10000         # 每条路径上限
+    max_in_prompt: 500             # image/table 的 context 字段截断长度
+  langgraph:
+    enabled: true                       # 总开关: true=使用 LangGraph agent, false=用 legacy agentic
+    max_retries: 1                      # 反思最大重试次数 (0=禁用反思循环)
+    fallback_on_error: true             # LangGraph 异常时自动降级到 legacy agentic pipeline
+
+    # ── 专业研究模式 (professional, 独立子图; 仅当请求 professional=true 时生效) ──
+    # 与普通检索链路完全隔离: 规划(1次LLM) → 多轮[检索→精排→policy(1次LLM/轮)] → 综述。
+    # 检索效率: 轮间清空 route_results 只精排新批次; 证据按主键去重累积; 轮次预算+无新增证据熔断。
+    professional:
+      enabled: true                     # 专业模式可用性 (false=即使请求 professional 也降级普通链路)
+      max_rounds: 4                     # 最大检索轮次 (硬熔断)
+      max_batches_per_round: 3          # 单轮并行检索批次上限 (映射为 MultiRouteDecision 的 sub 数)
+      stall_limit: 2                    # 连续 N 轮无"有质量新增"证据则提前收口
+      # #7: stall 判定的"有质量"门槛 (新增 hit 的 rerank_score ≥ 此值才算进步)。
+      #   null=沿用 reranker.quality_threshold; 设小数(如 0.3)可更早识别低分空转。
+      stall_quality_floor: null
+      # #8: 给 policy LLM 的"本轮检索摘要"长度上限 (字符), 控制 prompt 体积/时延。
+      obs_summary_max_chars: 1800
+      # 缺口收敛熔断: policy 连续 N+1 轮 continue 但缺口(facet 集合)始终不变, 且已有≥3篇证据,
+      #   说明在追语料里很可能不存在的数据 → 提前收口, 避免烧满轮次预算空转。
+      #   设 1 = 出现连续 2 轮相同缺口即收口 (实测缺口约第 2 轮起稳定, 设 1 才能真正省下后续轮次)。
+      gap_stall_limit: 1
+      # 规划/policy 是否关思考: true=关思考(直出 FC, 快且不会被超长 CoT 挤截断); false=开思考。
+      #   planner 开思考: 首轮规划只看 query, 观测短, 思考不易超预算, 拆解更稳 → 开;
+      #   policy   关思考: 越往后观测越长, 开思考易把 tool_call 顶出 max_tokens 致解析失败/提前收口 → 关;
+      #     (policy 决策本质是结构化 FC, 不依赖 CoT; 与普通模式 router 一致)
+      planner_disable_thinking: false   # plan 开思考 (规划阶段)
+      policy_disable_thinking: true     # policy 关思考 (直出 FC, 快且稳)
+      planner_max_tokens: 2048          # 开思考需给思考留足空间, 否则 plan 的 tool_call 会被截断
+      policy_max_tokens: 1024           # 关思考后纯 FC 决策输出很短
+      synthesis_snippet_chars: 500      # 综述上下文里每条证据片段的截断长度
+      # 综述生成阶段是否流式展示"思考过程" (思考走 thinking 通道, 正文走 text 通道):
+      #   true  → 开思考, 前端可分区展示思考过程与最终综述 (vLLM 需配 --reasoning-parser)
+      #   false → 关思考, 直出综述正文 (更省 token)
+      synthesis_show_thinking: true
+      synthesis_max_tokens: 6000        # 综述阶段 token 上限 (开思考后思考+正文都要预算, 勿过小)
+
+      # ── 文件定义式 skill (专家模式按用户发话选不同"思考方式") ──
+      # 每个 skill 是 pipeline/skills/<id>/ 下的文件夹 (SKILL.md+plan.md+policy.md+synthesis.md),
+      # 决定该类研究任务怎么规划(plan)、怎么逐轮引导检索(policy)、怎么组织综述(synthesis);
+      # 检索/精排流程对所有 skill 一致、不随 skill 改变。
+      # 选不到合适 skill 时 (router 判 none) → plan/policy/synthesis 逐字回退现有通用逻辑, 零回归。
+      skills:
+        enabled: true                   # false → 始终走现有通用逻辑 (等价未引入 skill)
+        dirs:
+          - pipeline/skills             # 内置 skill 目录 (相对路径锚定到 pipeline 包)
+          # - ~/.dp_rag/skills          # (可选) 用户自定义目录, 同 id 覆盖内置
+        upload_dir: uploads/skills      # 用户经 UI 上传/编辑的 skill 落盘目录 (自动并入 dirs, 同 id 覆盖内置)
+        default: literature_review      # 预留: 兜底 skill (当前未命中=None, 不强制套用)
+        router:
+          mode: hybrid                  # off=不选 | heuristic=仅触发词强命中 | llm=仅思考模型 | hybrid=思考模型为主+触发词强命中兜底
+          disable_thinking: false       # 选 skill 走"思考模型": 开思考, 让其推理后再判定 (会展示判定思路)
+          max_tokens: 512               # 含思考过程, 预算放宽
+          min_confidence: 0.6           # 思考模型"强匹配"置信度下限; 低于此 → 回退通用逻辑
+          strong_min_hits: 2            # 触发词"强命中"所需的最少命中数 (单个关键词不算强匹配)
+
+    # ── 反思 LLM (legacy + FC 通用) ──────────────────────────────────────
+    reflection:
+      enabled: true                     # 反思节点开关
+      temperature: 0.0
+      # max_tokens 取值参考:
+      #   legacy JSON 模式: 反思只出短 JSON, 200-400 即可
+      #   FC 隐式 CoT 模式: 输出 = <think>思考</think> + <tool_call>策略</tool_call>
+      #                     必须 >= 1024 否则会被截断 (FC 路径还可被 routing.reflect_max_tokens 覆盖)
+      max_tokens: 2000
+      timeout: 100                      # 反思 LLM 超时 (秒)
+      # 反思 LLM 服务地址 (留 null/缺省 = 复用 generation.api_base)
+      # api_base: "https://api.gpugeek.com/v1"
+      # model:    "Vendor3/qwen-plus-latest"
+      # api_key:  "..."
+      api_base: "http://localhost:8000/v1"
+      model:    "/models/Qwen3.5-9B"
+      api_key:  "EMPTY"
+      # 反思 LLM 是否走 vLLM 专属的 chat_template_kwargs:
+      #   true  : vLLM 后端, 下发 chat_template_kwargs.enable_thinking 控制思考
+      #   false : 云平台后端 (阿里云 / DeepSeek API / GPUGeek), 不下发任何思考控制参数
+      disable_thinking_extra_body: true
+      # 反思思考开关 (仅当 disable_thinking_extra_body=true 时生效):
+      #   legacy 模式: 反思输出短 JSON, 推荐 true (关思考节省 token)
+      #   FC 模式: 被 routing.reflect_disable_thinking 覆盖, 这里设啥都行
+      disable_thinking: true
+
+      # 反思 LLM 看到的检索摘要 (不含 metadata/结构化 chunk)
+      summary:
+        snippet_chars: 400              # 每条 hit 摘要长度
+        max_hits_per_route: 6           # 每条路径最多展示 hit 数
+        max_total_chars: 5000           # 摘要总字符上限
+        max_chars_per_route: 2000       # 单路径摘要上限
+
+    # ── Reranker ─────────────────────────────────────────────────────────
+    reranker:
+      enabled: true                     # reranker 总开关
+      api_base: "http://localhost:8001/v1"
+      model:    "/models/Qwen3-Reranker-4B"
+      top_k: 5                          # 每条路径保留的 top-k chunk 数
+      quality_k: 3                      # 计算质量得分时取 top-k 条求平均
+      # 默认全局阈值 (P0 #1: quality_score 现为 0.7*max + 0.3*mean 加权混合,
+      # 不再被弱路径稀释; 但本阈值同时也是每条路径未指定 chunk_type 时的回退值)
+      quality_threshold: 0.25
+      # P1 #5 旧字段: 按 chunk_type 全局配置阈值. 新代码已迁移到 quality_thresholds 矩阵,
+      # 此处保留作为 fallback (quality_thresholds.by_type 未配置时使用)。
+      quality_threshold_by_type:
+        text: 0.30
+        image: 0.10
+        table: 0.10
+        references: 0.15
+      # P1.1 (2026-05): per-(route, stage, type) 阈值矩阵
+      # 查找顺序: by_route[route][stage][type] → by_route[route][stage].default
+      #          → by_route[route][type] → by_route[route].default
+      #          → by_type[type] → default
+      # 修复问题 #3 (路径无差异化): summary/progressive_l1/l2/local 用不同基线;
+      #          问题 #6 (诊断与门控阈值不一致): rerank_diagnosis 也读这份矩阵
+      quality_thresholds:
+        default: 0.25
+        by_type:
+          text: 0.30
+          image: 0.10
+          table: 0.10
+          references: 0.15
+        by_route:
+          summary:
+            default: 0.32           # summary 是高浓缩, 应该高分
+          progressive:
+            l1:                      # L1 doc-anchor: 粗筛, 宽松
+              text: 0.18
+              default: 0.12
+            l2:                      # L2 doc-scoped drill: 精排, 严格
+              text: 0.30
+              image: 0.12
+              table: 0.12
+              references: 0.18
+              default: 0.18
+            l2_global:               # 全库 fallback: 最严格
+              text: 0.32
+              default: 0.20
+            default: 0.25            # 未打 stage 兜底
+          local:
+            text: 0.30
+            image: 0.12
+            table: 0.12
+            references: 0.20
+            default: 0.18
+          metadata:                  # 仅 topk_only 命中 (entity-only) 走到这里
+            text: 0.22
+            default: 0.12
+      # P2.3: fail-open 时的 emb_score 安全网门槛 (null = 禁用, 保持旧 fail-open 全放行)
+      # 设为 0.0~1.0: 用 top_n 的 emb_score 平均 / 此值 比较, 低于此值即便 rerank 失败也走 retry
+      fail_open_min_emb_quality: null
+      timeout: 60                       # API 请求超时 (秒)
+      max_retries: 2
+      fail_open: true                   # P1 #17: API 失败时 reranker 返回 [], 上游降级
+      # ── 低分诊断 (Phase 1: 规则产出 RouteDecision, reflect 仍可 override) ──
+      diagnosis:
+        enabled: true                    # false=与改前一致, 低分仅 needs_retry 不设 rewrite_hint
+        # P0.1 (2026-05): 恢复与代码 default 一致的 skip_reflect 分层基线
+        #   - skip_reflect_confidence 0.90: 与 wrong_type strong (0.92) 拉开距离;
+        #     只有 "fig/tab 显式引用 + 对应 chunk 缺失" 这种强信号才能跳过 reflect
+        #   - 弱信号 / refs / wrong_route 都走 reflect 兜底, 避免规则误判直跑 retry
+        skip_reflect_confidence: 0.90
+        skip_reflect_causes:             # 仅这些 cause 允许跳过 reflect
+          - wrong_type
+          - wrong_route
+        type_low_ratio: 0.5              # type avg < global×此值 → wrong_type
+        route_dead_score: 0.15           # route max 低于此 → wrong_route (与代码 default 一致)
+        narrow_hit_cap: 2                # 命中数低于此 → too_narrow
+        broad_hit_floor: 10              # 命中数高于此 → too_broad
+        # P0.1 (2026-05): 拆开 strong / weak / refs / route 真正形成分层
+        wrong_type_strong_confidence: 0.92    # 显式 fig/tab 引用 + 对应 chunk 缺失/低分 → 跳 reflect
+        wrong_type_weak_confidence:   0.78    # 仅 page/paragraph 引用 → 走 reflect
+        wrong_type_refs_confidence:   0.84    # references 意图 → 走 reflect
+        wrong_route_confidence:       0.84    # 路径全灭/存活差异 → 走 reflect
+        too_narrow_confidence: 0.72
+        too_narrow_relax_confidence: 0.70
+        too_broad_confidence: 0.75
+        zero_confidence: 0.35
+
+    observability:
+      tracing: false                    # OpenTelemetry tracing
+      prometheus: false                 # Prometheus metrics
+
+    # ── Function Calling 路由 (v4.1, pipeline.routing 模块) ──────────────
+    # mode = legacy : 现状 JSON-mode router/reflect, 零行为变化
+    # mode = fc     : router/reflect 改走 Function Calling + 隐式 CoT
+    #   - 单次决策严格 ≤ 1 次 LLM 调用 (router 1 + reflect 0/1)
+    #   - 工具参数只剩纯检索策略 (paths/subs/refs/...), 无 conf/reasoning 等元数据
+    #   - 模型在 <think>...</think> 内完成 CoT, 不进入业务决策, 仅打日志可观测
+    #   - FC 任何环节失败自动降级到 legacy 路径, 不破坏检索可用性
+    #
+    # vLLM 启动必备参数 (router 直出 FC, 不需 reasoning-parser):
+    #   --enable-auto-tool-choice
+    #   --tool-call-parser hermes        # Qwen 系列通用
+    # (--reasoning-parser 仅 reflect 仍开思考时才需要)
+    #
+    # 日志: pipeline.routing.core + pipeline.retrieval.langgraph_agent;
+    # 设 INFO 即可看到 [routing.route]/[routing.reflect]/[router]/[reflect] 全流程.
+    routing:
+      mode: "fc"                        # legacy | fc
+
+      # ── 工具暴露 ─────────────────────────────────────────────────────
+      enable_multi: true                # 暴露 multi 工具 (复合查询, 2-3 子查询)
+      enable_ask:   true                # 暴露 ask 工具 (反问 user); 体验受影响, 默认关
+      enable_reuse: true                # 暴露 reuse 工具 (不检索直接答: 闲聊/超界/复用上轮);
+                                        # 默认开启, 可解决闲聊/翻译/继续/确认等无需检索的发话, 大幅省成本.
+                                        # 关闭后所有发话都会强制走 plan/multi (检索) 路径.
+      parallel_tool_calls: false        # 单决策即可, 关闭节省 token
+      history_turns: 1                  # FC 路由器看的历史轮数 (与 generation.router.history_turns 同义)
+      # ── 路由容量 (#8): 单 sub 内 paths 上限 + 复合查询 subs 上限 ──
+      max_paths_per_sub: 2              # plan / multi.sub 内最多 paths (互补双路径)
+      max_subqueries: 3                 # multi 最多子查询数 (三意图 query 用 3 subs)
+
+      # ── 思考模式开关 ──────────────────────────────────────────────────
+      # router: 强制关思考, 只输出 FC tool call (见 router_system_fc.md)
+      # reflect: 可按需开思考; vLLM 开思考时需配 --reasoning-parser deepseek_r1
+      router_disable_thinking:  true   # router 关思考 (推荐, 与 prompt 一致)
+      reflect_disable_thinking: true   # reflect 关思考
+
+      # ── max_tokens ────────────────────────────────────────────────────
+      # router FC 输出通常 < 300 token; 过大易拖慢且诱发模型啰嗦/截断
+      # 缺省/null 时分别回退:
+      #   router  → generation.router.max_tokens → 内置 600
+      #   reflect → reflection.max_tokens         → 内置 500
+      router_max_tokens:  512           # 仅 FC 策略 JSON, 不含思考块
+      reflect_max_tokens: 2048          # 反思输出 (若开思考需更大)
+
+# ── 生成 (LLM) ─────────────────────────────────────────────────────────
+generation:
+  # api_base: "https://api.gpugeek.com/v1"
+  # model: "Vendor3/qwen-plus-latest"
+  # api_key: "${LLM_API_KEY}"
+  # 服务器模型地址
+  api_base: "http://localhost:8000/v1"
+  model: "/models/Qwen3.5-9B"
+  # export LLM_API_KEY="..."
+  api_key: "EMPTY"
+  # 思考模式控制 (Qwen3 / DeepSeek-R1 等推理模型):
+  #   disable_thinking: true  → 关闭思考, 输出更精简
+  #   disable_thinking: false → 打开思考, 模型会先 <think/> 再输出正文
+  disable_thinking: true
+  # vLLM 专属: 通过 chat_template_kwargs.enable_thinking 参数控制思考模式;
+  # 设为 true 后会向 vLLM 下发 enable_thinking=True/False, 不再追加 /no_think 文本;
+  # 非 vLLM 后端 (GPUGeek 等) 不支持此参数, 应保持 false, 改用 /no_think 文本控制
+  disable_thinking_extra_body: true
+  temperature: 0
+  max_tokens: 3096
+  stream: False
+  timeout: 120
+  max_retries: 3
+  max_history_turns: 5             # 多轮对话只保留最近 N 轮 user+assistant
+  router:
+    # 路由 LLM 独立配置; 留 null 即复用上方 generation 的 api_base/model/api_key
+    # 推荐 router 用更小/更便宜/更快的模型 + temperature=0 输出严格 JSON
+    api_base: null
+    model: null
+    api_key: null
+    temperature: 0.0
+    # router 输出 JSON 通常 < 200 token, max_tokens 调小可以让 vLLM 后端调度更快;
+    # 太大反而让后端为大窗口预分配 KV cache, 导致首 token 延迟显著上升
+    max_tokens: 3000
+    # router 独立超时/重试 (远小于全局 generation 配置), 失败立即走启发式 fallback,
+    # 避免单次路由占用一两分钟挂着不返回
+    timeout: 100
+    max_retries: 1
+    # 路由器只看最近 N 轮历史用于代词指代消解; 太多反而拖慢且引入噪音
+    history_turns: 1
+    # 是否下发 response_format=json_schema 强约束 LLM 输出结构 (OpenAI 兼容).
+    # 后端不支持时会自动一次性降级 (剥掉 response_format 重试), 后续不再尝试;
+    # 若已知后端完全不识别 response_format, 可设为 false 避免每次首请求多一次重试.
+    use_json_schema: False
+  # system_prompt_path: 指向 system prompt 文件 (md/txt), 优先级高于 system_prompt 字段;
+  # 修改 prompt 只需编辑该文件, 无需改配置。留 null 则使用内置默认 prompt。
+  system_prompt_path: null
+  system_prompt: ""

@@ -1,0 +1,38 @@
+[
+  {
+    "question": "(Al,Mg,Ca,Mn)-oxy-sulfide复合型夹杂物对耐候钢局部腐蚀有什么诱发作用？",
+    "ground_truth": "耐候钢中的(Al,Mg,Ca,Mn)-oxy-sulfide复合型夹杂物由(Ca,Mn)-sulfide和(Ca,Al)-oxide组成，在含Cl-环境中会诱发局部腐蚀，夹杂物周围的腐蚀演化机理涉及溶解和电化学过程。",
+    "ground_contexts": [
+      "SEM/EDS结果表明，耐候钢中的(Al,Mg,Ca,Mn)-oxy-sulfide复合型夹杂物由(Ca,Mn)-sulfide和(Ca,Al)-oxide组成",
+      "在仅含Cl-环境中的腐蚀演化机理"
+    ]
+  },
+  {
+    "question": "Sn-Sb耐候钢在模拟高湿热海洋大气环境中的耐蚀性表现如何？",
+    "ground_truth": "Sn-Sb耐候钢在模拟高湿热海洋大气环境中具有良好的耐蚀性能，Sn和Sb元素的添加能够提高钢的耐腐蚀能力。",
+    "ground_contexts": [
+      "Sn-Sb耐候钢在模拟高湿热海洋大气环境中的耐蚀性研究"
+    ]
+  },
+  {
+    "question": "Ti微合金化高强耐候钢的成分设计要点是什么？",
+    "ground_truth": "Ti微合金化高强耐候钢通过添加Ti元素进行微合金化，在保证强度的同时提高耐候性能，成分设计需平衡强度、韧性和耐蚀性。",
+    "ground_contexts": [
+      "Ti微合金化高强耐候钢的成分设计研究"
+    ]
+  },
+  {
+    "question": "SO2在碳钢初期大气腐蚀中扮演什么角色？",
+    "ground_truth": "SO2在碳钢初期大气腐蚀中起到加速腐蚀的作用，促进腐蚀产物的形成和电化学反应。",
+    "ground_contexts": [
+      "SO2在碳钢初期大气腐蚀中的作用"
+    ]
+  },
+  {
+    "question": "V-Ti集装箱用耐候钢在模拟工业大气环境下的耐蚀行为如何？",
+    "ground_truth": "V-Ti集装箱用耐候钢在模拟工业大气环境下表现出一定的耐蚀行为，V和Ti元素的协同作用有助于提高耐腐蚀性能。",
+    "ground_contexts": [
+      "V-Ti集装箱用耐候钢在模拟工业大气环境下耐蚀行为的研究"
+    ]
+  }
+]

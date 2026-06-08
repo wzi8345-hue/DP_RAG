@@ -1,0 +1,21 @@
+# DP-RAG Pipeline - Python Dependencies
+# Core
+pyyaml>=6.0
+pydantic>=2.0
+requests>=2.28
+httpx>=0.24
+
+# Milvus
+pymilvus>=2.4.0
+
+# API Server
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+
+# LangGraph (optional, for agentic RAG)
+langgraph>=0.0.30
+langchain-core>=0.1.0
+
+# Observability (optional)
+prometheus_client>=0.20.0
