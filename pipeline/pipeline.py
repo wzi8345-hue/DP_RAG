@@ -612,10 +612,23 @@ class Pipeline:
 
     # ── 便利方法 ──────────────────────────────────────────────────────
 
-    def stats(self) -> Dict[str, Any]:
-        """查看 Milvus 集合统计。"""
-        r = self.run_step("store", stats_only=True)
-        return r.data if r.success else {"error": r.error}
+    def stats(self, collection: Optional[str] = None) -> Dict[str, Any]:
+        """查看 Milvus 集合统计。
+
+        默认统计原始默认库 (_default_collection), 不受检索时集合切换的污染;
+        传入 collection 则统计指定集合。
+        """
+        target = collection or self._default_collection
+        prev = self.config.milvus.get("collection")
+        self.config.milvus["collection"] = target
+        try:
+            r = self.run_step("store", stats_only=True)
+            return r.data if r.success else {"error": r.error}
+        finally:
+            if prev is not None:
+                self.config.milvus["collection"] = prev
+            else:
+                self.config.milvus.pop("collection", None)
 
     def history(self) -> List[Dict]:
         """返回所有已执行步骤的历史记录。"""

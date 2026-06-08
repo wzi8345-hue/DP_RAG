@@ -1588,12 +1588,10 @@ class QueryFlow:
                                "session_meta": {...}, "answer": "完整回复"}
               {"type": "error", "message": "..."}
         """
-        # 切换目标集合: 更新 config 并清空缓存, 下次懒加载会用新集合
-        if collection is not None:
-            current = self.config.milvus.get("collection", "literature_chunks")
-            if current != collection:
-                self.config.milvus["collection"] = collection
-                self.invalidate_caches()
+        # 注: 目标集合切换 (含 collection=None 回退默认库) 已由上层
+        # Pipeline._maybe_switch_collection 统一处理, 这里不再重复切换,
+        # 以免遗漏"空集合回退原始默认库"的逻辑导致沿用被污染的集合。
+        _ = collection
 
         gen_cfg = self.config.generation
         history = session.recent_messages() or None
