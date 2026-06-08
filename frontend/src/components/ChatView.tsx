@@ -15,6 +15,7 @@ import type {
   RetrievalMode,
   StreamEvent,
 } from "../lib/types";
+import { DEFAULT_COLLECTION } from "../lib/types";
 import {
   deriveTitle,
   loadConversation,
@@ -72,18 +73,20 @@ function CollectionSelector({
     return () => { alive = false; };
   }, [api]);
 
+  const customKbs = collections.filter((c) => c.name !== DEFAULT_COLLECTION);
+
   return (
     <select
       value={value}
       disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
-      className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 outline-none focus:border-blue-500"
-      title="选择检索的知识库"
+      className="relative z-10 min-h-8 min-w-[8.5rem] shrink-0 cursor-pointer appearance-auto rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 outline-none hover:border-slate-600 focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+      title="选择检索的知识库 (默认 = literature_chunks)"
     >
       <option value="">默认知识库</option>
-      {collections.map((c) => (
+      {customKbs.map((c) => (
         <option key={c.name} value={c.name}>
-          {c.name.replace(/^kb_/, "")} ({c.row_count})
+          {c.display_name || c.name.replace(/^kb_/, "")}
         </option>
       ))}
     </select>
@@ -386,7 +389,7 @@ export function ChatView({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
             <ModeToggle
               expert={settings.professional}
               disabled={busy}

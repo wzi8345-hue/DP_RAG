@@ -98,12 +98,22 @@ class Pipeline:
         self._ingest_flow: Optional[IngestFlow] = None
         # 集合切换追踪: 记录 QueryFlow 当前绑定的集合名, 切换时清空缓存
         self._active_collection: Optional[str] = None
+        # 原始默认集合名: collection=None 时一律回退到它。
+        # 不能用 config.milvus["collection"], 因为该字段会被 _maybe_switch_collection
+        # 覆盖为最近一次显式指定的集合; 否则"默认知识库"会被污染成上次用过的库。
+        self._default_collection: str = self.config.milvus.get(
+            "collection", "literature_chunks"
+        )
 
     # ── flow 缓存 ─────────────────────────────────────────────────────
 
     def _maybe_switch_collection(self, collection: Optional[str]) -> None:
-        """切换目标集合: 若与当前 QueryFlow 绑定的集合不同, 更新 config 并清空缓存。"""
-        effective = collection or self.config.milvus.get("collection", "literature_chunks")
+        """切换目标集合: 若与当前 QueryFlow 绑定的集合不同, 更新 config 并清空缓存。
+
+        collection=None / 空 时回退到 *原始* 默认集合 (self._default_collection),
+        而非 config 里被上一次切换覆盖过的值, 避免"默认知识库"被污染成上次用过的库。
+        """
+        effective = collection or self._default_collection
         if self._active_collection is not None and self._active_collection != effective:
             self.config.milvus["collection"] = effective
             if self._query_flow is not None:

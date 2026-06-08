@@ -121,6 +121,9 @@ export interface DocSummaryResponse {
 // 知识库 (Collection) 管理
 // ---------------------------------------------------------------------------
 
+/** 系统默认 Milvus 集合; 空串 collection 设置会回退到此库 */
+export const DEFAULT_COLLECTION = "literature_chunks";
+
 export interface CollectionInfo {
   name: string;
   display_name?: string;

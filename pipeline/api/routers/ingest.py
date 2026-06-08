@@ -11,7 +11,13 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from ..deps import get_pipeline, get_task_store, verify_api_key
 from ..models import IngestRequest, ParseRequest, LoadVecRequest, TaskResponse
 from ...flows.ingest import IngestResult
-from .collections import kb_workspace_dir, make_collection_slug, safe_doc_stem
+from .collections import (
+    _kb_meta_path,
+    _write_kb_meta,
+    kb_workspace_dir,
+    make_collection_slug,
+    safe_doc_stem,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +248,9 @@ async def ingest_upload(
     safe_collection = make_collection_slug(collection)
     kb_dir = kb_workspace_dir(safe_collection)
     os.makedirs(kb_dir, exist_ok=True)
+    # 直接带 (中文) 集合名上传时, 若尚无元数据则补写显示名, 保证列表回显原名而非 slug。
+    if not os.path.isfile(_kb_meta_path(kb_dir)):
+        _write_kb_meta(kb_dir, (collection or "").strip(), safe_collection)
 
     # 每篇 PDF 一个独立子目录, 保存原始 PDF 为 source.pdf
     items: List[tuple] = []

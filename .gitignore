@@ -49,3 +49,7 @@ logs/
 
 # ── 本地 agent / 工具缓存 ───────────────────────────────
 .claude/
+.cursor/
+
+# ── 嵌套仓库历史备份 (保留 GitLab 历史, 不上传) ──────────
+pipeline/.git_gitlab_bak/

@@ -13,7 +13,6 @@ interface FormState {
   description: string;
   priority: string;
   triggers: string; // 每行一个
-  prefer_first_paths: string[];
   min_docs: string;
   need_conflict_check: boolean;
   need_quantitative_data: boolean;
@@ -34,7 +33,6 @@ const EMPTY: FormState = {
   description: "",
   priority: "50",
   triggers: "",
-  prefer_first_paths: [],
   min_docs: "",
   need_conflict_check: false,
   need_quantitative_data: false,
@@ -58,7 +56,6 @@ function fromSpec(s: SkillSummary | SkillSpec, overrideId?: string): FormState {
     description: s.description || "",
     priority: s.priority != null ? String(s.priority) : "50",
     triggers: (s.triggers || []).join("\n"),
-    prefer_first_paths: s.prefer_first_paths || [],
     min_docs: suff.min_docs != null ? String(suff.min_docs) : "",
     need_conflict_check: !!suff.need_conflict_check,
     need_quantitative_data: !!suff.need_quantitative_data,
@@ -90,7 +87,6 @@ function toSpec(f: FormState): SkillSpec {
     description: f.description.trim(),
     priority: num(f.priority),
     triggers: f.triggers.split("\n").map((t) => t.trim()).filter(Boolean),
-    prefer_first_paths: f.prefer_first_paths,
     sufficiency,
     tuning,
     guards: f.guards,
@@ -139,7 +135,7 @@ export function SkillsManager({ api }: { api: ApiClient }) {
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
 
-  const toggle = (k: "prefer_first_paths" | "guards", v: string) =>
+  const toggle = (k: "guards", v: string) =>
     setForm((p) => {
       const arr = p[k];
       return { ...p, [k]: arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v] };
@@ -205,7 +201,6 @@ export function SkillsManager({ api }: { api: ApiClient }) {
   };
 
   const disabled = data != null && !data.enabled;
-  const paths = tpl?.valid_paths || ["summary", "progressive", "local", "metadata"];
   const guards = tpl?.valid_guards || [];
 
   return (
@@ -394,20 +389,6 @@ export function SkillsManager({ api }: { api: ApiClient }) {
               />
             </Field>
           </div>
-
-          <Field label="首轮偏好检索路径" help="可选，影响首批检索方式">
-            <div className="flex flex-wrap gap-2">
-              {paths.map((p) => (
-                <Chip
-                  key={p}
-                  active={form.prefer_first_paths.includes(p)}
-                  onClick={() => toggle("prefer_first_paths", p)}
-                >
-                  {p}
-                </Chip>
-              ))}
-            </div>
-          </Field>
 
           <Field label="收口标准 (sufficiency)" help="达到即可结束检索">
             <div className="flex flex-wrap items-center gap-4">

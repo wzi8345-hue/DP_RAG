@@ -134,7 +134,8 @@ class UniParserClient:
         if host.endswith("/api/"):
             host = host[: -len("api/")]
         self.host = host
-        self.api_key = api_key
+        # 防御性清洗: 去掉首尾空白/换行 (避免 .env / 配置粘贴带入的 \r\n 破坏请求头)。
+        self.api_key = (api_key or "").strip()
         self.output_dir = output_dir
         self.parse_modes = {**DEFAULT_PARSE_MODES, **(parse_modes or {})}
         self.output_flags = {**DEFAULT_OUTPUT_FLAGS, **(output_flags or {})}

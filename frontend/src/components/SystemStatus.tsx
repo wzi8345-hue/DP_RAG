@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ApiClient } from "../lib/api";
-import type { HealthResponse, StatsResponse } from "../lib/types";
+import type { CollectionInfo, HealthResponse, StatsResponse } from "../lib/types";
+import { DEFAULT_COLLECTION } from "../lib/types";
 import { HealthDot } from "./HealthDot";
 
 export function SystemStatus({
@@ -16,20 +17,21 @@ export function SystemStatus({
 }) {
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [statsErr, setStatsErr] = useState<string | null>(null);
+  const [collections, setCollections] = useState<CollectionInfo[] | null>(null);
   const [loading, setLoading] = useState(false);
 
   const loadStats = useCallback(async () => {
     setLoading(true);
-    try {
-      const s = await api.stats();
-      setStats(s);
+    const [s, c] = await Promise.allSettled([api.stats(), api.listCollections()]);
+    if (s.status === "fulfilled") {
+      setStats(s.value);
       setStatsErr(null);
-    } catch (e) {
+    } else {
       setStats(null);
-      setStatsErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
+      setStatsErr(s.reason instanceof Error ? s.reason.message : String(s.reason));
     }
+    setCollections(c.status === "fulfilled" ? c.value.collections : null);
+    setLoading(false);
   }, [api]);
 
   useEffect(() => {
@@ -97,10 +99,37 @@ export function SystemStatus({
           })}
         </div>
 
-        {/* Stats */}
+        {/* 知识库列表 */}
         <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-5">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold">Milvus 集合统计</h3>
+            <h3 className="text-sm font-semibold">
+              知识库列表
+              {collections && (
+                <span className="ml-2 text-xs font-normal text-slate-500">
+                  共 {collections.length} 个
+                </span>
+              )}
+            </h3>
+            {loading && <span className="text-xs text-slate-500">加载中…</span>}
+          </div>
+          {collections && collections.length > 0 ? (
+            <CollectionList
+              items={collections}
+              defaultDocCount={
+                typeof stats?.stats?.doc_count === "number"
+                  ? stats.stats.doc_count
+                  : undefined
+              }
+            />
+          ) : (
+            <p className="text-sm text-slate-500">暂无知识库</p>
+          )}
+        </div>
+
+        {/* 默认库详细统计 */}
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold">默认库详细统计</h3>
             {loading && <span className="text-xs text-slate-500">加载中…</span>}
           </div>
           {statsErr ? (
@@ -112,6 +141,68 @@ export function SystemStatus({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function CollectionList({
+  items,
+  defaultDocCount,
+}: {
+  items: CollectionInfo[];
+  defaultDocCount?: number;
+}) {
+  const sorted = [...items].sort((a, b) => {
+    if (a.name === DEFAULT_COLLECTION) return -1;
+    if (b.name === DEFAULT_COLLECTION) return 1;
+    return b.row_count - a.row_count;
+  });
+  return (
+    <div className="space-y-2">
+      {sorted.map((c) => {
+        const isDefault = c.name === DEFAULT_COLLECTION;
+        const label = c.display_name || c.name.replace(/^kb_/, "");
+        const docCount = isDefault
+          ? defaultDocCount ?? c.doc_count
+          : c.doc_count;
+        const hasDocs = docCount != null && docCount > 0;
+        return (
+          <div
+            key={c.name}
+            className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 ${
+              isDefault
+                ? "border-blue-500/30 bg-blue-500/5"
+                : "border-slate-800 bg-slate-950/40"
+            }`}
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-sm font-medium text-slate-200">{label}</span>
+                {isDefault && (
+                  <span className="shrink-0 rounded bg-blue-600/20 px-1.5 py-0.5 text-[10px] text-blue-300">
+                    默认
+                  </span>
+                )}
+              </div>
+              <code className="text-[11px] text-slate-500">{c.name}</code>
+            </div>
+            <div className="flex shrink-0 items-center gap-5 text-right">
+              <div>
+                <div className="text-[11px] text-slate-500">文献</div>
+                <div className="text-sm font-semibold text-slate-100">
+                  {hasDocs ? docCount!.toLocaleString() : "—"}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] text-slate-500">文本块</div>
+                <div className="text-sm font-semibold text-slate-100">
+                  {c.row_count.toLocaleString()}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

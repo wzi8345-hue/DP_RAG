@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _KB_PREFIX = "kb_"
+_DEFAULT_COLLECTION = "literature_chunks"
 # 集合名仅允许小写字母/数字/下划线, 最长 64 字符
 _SANITIZE_RE = re.compile(r"[^a-z0-9_]")
 # 文档目录名: 保留 unicode, 仅剔除路径分隔符与文件系统危险字符
@@ -157,14 +158,22 @@ def _disk_doc_count(kb_dir: str) -> int:
     )
 
 
+def _is_kb_collection(name: str, *, default_collection: str = _DEFAULT_COLLECTION) -> bool:
+    """判断 Milvus 集合名是否属于知识库 (默认库 + kb_ 前缀)。"""
+    return name == default_collection or name.startswith(_KB_PREFIX)
+
+
 def _list_disk_kbs(prefix: str) -> List[str]:
-    """列出本地工作目录下匹配前缀的知识库目录名。"""
+    """列出本地工作目录下的知识库目录 (仅 kb_*; 排除 uploads/skills 等)。"""
     if not os.path.isdir(UPLOAD_ROOT):
         return []
     return [
         entry.name
         for entry in os.scandir(UPLOAD_ROOT)
-        if entry.is_dir() and (not prefix or entry.name.startswith(prefix))
+        if entry.is_dir()
+        and not entry.name.startswith(".")
+        and entry.name.startswith(_KB_PREFIX)
+        and (not prefix or entry.name.startswith(prefix))
     ]
 
 
@@ -173,25 +182,37 @@ def list_collections(
     prefix: str = _KB_PREFIX,
     _auth: str = Depends(verify_api_key),
 ) -> CollectionsListResponse:
-    """列出知识库集合: Milvus 已有集合 ∪ 本地工作目录 (空库也可见)。"""
+    """列出知识库集合: 默认库 literature_chunks + kb_* 集合 ∪ 本地 kb_* 工作目录。"""
     pipe = get_pipeline()
+    default_coll = getattr(pipe, "_default_collection", None) or _DEFAULT_COLLECTION
     by_name: Dict[str, Dict[str, Any]] = {}
 
-    # 1) Milvus 中已灌入数据的集合
-    for c in pipe.list_collections(prefix=prefix):
-        by_name[c["name"]] = {"name": c["name"], "row_count": c.get("row_count", 0)}
+    # 1) Milvus: 只保留默认库与 kb_* (排除 skills 等无关集合)
+    for c in pipe.list_collections(prefix=""):
+        name = c["name"]
+        if not _is_kb_collection(name, default_collection=default_coll):
+            continue
+        if prefix and name != default_coll and not name.startswith(prefix):
+            continue
+        by_name[name] = {"name": name, "row_count": c.get("row_count", 0)}
 
-    # 2) 本地工作目录 (含尚未灌入的空知识库)
+    # 2) 默认库必须始终可见 (即使用户只筛 kb_ 前缀)
+    by_name.setdefault(default_coll, {"name": default_coll, "row_count": 0})
+
+    # 3) 本地 kb_* 工作目录 (含尚未灌入的空知识库; uploads/skills 等不进列表)
     for name in _list_disk_kbs(prefix):
         by_name.setdefault(name, {"name": name, "row_count": 0})
 
-    # 3) 补充每个库的本地文档数 + 显示名
+    # 4) 补充每个库的本地文档数 + 显示名
     collections = []
     for name, info in sorted(by_name.items()):
         kb_dir = kb_workspace_dir(name)
         info["doc_count"] = _disk_doc_count(kb_dir)
-        fallback = name[len(_KB_PREFIX):] if name.startswith(_KB_PREFIX) else name
-        info["display_name"] = _read_display_name(kb_dir, fallback)
+        if name == default_coll:
+            info["display_name"] = "默认知识库"
+        else:
+            fallback = name[len(_KB_PREFIX):] if name.startswith(_KB_PREFIX) else name
+            info["display_name"] = _read_display_name(kb_dir, fallback)
         collections.append(CollectionInfo(**info))
 
     return CollectionsListResponse(collections=collections)

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSettings, type Settings } from "../lib/settings";
 import { ApiClient } from "../lib/api";
 import type { CollectionInfo } from "../lib/types";
+import { DEFAULT_COLLECTION } from "../lib/types";
 
 export function SettingsModal({
   onClose,
@@ -146,16 +147,18 @@ function SettingsCollectionSelect({
     return () => { alive = false; };
   }, [settings]);
 
+  const customKbs = collections.filter((c) => c.name !== DEFAULT_COLLECTION);
+
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="input"
+      className="input cursor-pointer"
     >
-      <option value="">默认知识库</option>
-      {collections.map((c) => (
+      <option value="">默认知识库 (literature_chunks)</option>
+      {customKbs.map((c) => (
         <option key={c.name} value={c.name}>
-          {c.name.replace(/^kb_/, "")} ({c.row_count})
+          {c.display_name || c.name.replace(/^kb_/, "")}
         </option>
       ))}
     </select>
