@@ -8,8 +8,11 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
-from ..deps import get_pipeline, get_task_store, require_auth
+from ..authz import require_write
+from ..deps import AuthContext, get_pipeline, get_task_store, require_auth
 from ..models import IngestRequest, ParseRequest, LoadVecRequest, TaskResponse
+from ...clients import object_store
+from ...db import repo
 from ...flows.ingest import IngestResult
 from .collections import (
     _kb_meta_path,
@@ -81,6 +84,25 @@ def _summarize_ingest(results: List[IngestResult]) -> Dict[str, Any]:
             for r in results
         ],
     }
+
+
+def _upload_doc_artifacts(collection: str, doc_id: str, doc_dir: str) -> str | None:
+    """Upload local parse/vector artifacts for one document; return object prefix."""
+    if not object_store.configured() or not os.path.isdir(doc_dir):
+        return None
+    client = object_store.get_object_store()
+    prefix = object_store.document_prefix(collection, doc_id)
+    for root, _, files in os.walk(doc_dir):
+        for name in files:
+            path = os.path.join(root, name)
+            rel = os.path.relpath(path, doc_dir).replace(os.sep, "/")
+            key = f"{prefix}/{rel}"
+            content_type = "application/pdf" if name.lower().endswith(".pdf") else "application/json" if name.lower().endswith(".json") else None
+            try:
+                client.upload_file(path, key, content_type=content_type)
+            except Exception as e:
+                logger.warning("[object-store] 上传解析产物失败 %s -> %s: %s", path, key, e)
+    return prefix
 
 
 @router.post("/ingest/rebuild", response_model=TaskResponse)
@@ -177,7 +199,7 @@ def _ingest_upload(
 ) -> Dict[str, Any]:
     """后台任务: 将已上传的 PDF 灌入指定集合。
 
-    items: [(pdf_path, doc_dir)], 中间产物落在每篇文档自己的 doc_dir 下,
+    items: [(pdf_path, doc_dir, doc_id, filename, owner_id, pdf_object_key, artifact_prefix)],
     与知识库工作目录绑定, 便于按库管理 / 重建 / 清理。
     skipped_existing: 因已入库 (同名 doc_id 已在集合中) 而被跳过的原始文件名,
     仅用于结果回显。
@@ -188,7 +210,9 @@ def _ingest_upload(
     total = len(items)
 
     results = []
-    for idx, (fp, doc_dir) in enumerate(items, start=1):
+    for idx, (fp, doc_dir, doc_id, filename, owner_id, pdf_key, artifact_prefix) in enumerate(items, start=1):
+        doc_status = "failed"
+        chunk_count = 0
         try:
             r = pipe.ingest_files(
                 [fp],
@@ -197,11 +221,32 @@ def _ingest_upload(
                 backend=backend or None,
             )
             results.append(r)
+            chunk_count = int(r.total_chunks or 0)
+            doc_status = "ready" if r.steps and all(s.success for s in r.steps) else "failed"
+            uploaded_prefix = _upload_doc_artifacts(collection, doc_id, doc_dir)
+            artifact_prefix = uploaded_prefix or artifact_prefix
             task_store.update_progress(task_id, idx, total, os.path.basename(doc_dir))
         except Exception as e:
             logger.warning(f"[ingest-upload] 灌入失败 {fp}: {e}")
             results.append(IngestResult(file_paths=[fp], steps=[]))
             task_store.update_progress(task_id, idx, total, os.path.basename(doc_dir))
+        finally:
+            if repo.available():
+                try:
+                    repo.upsert_document(
+                        collection_name=collection,
+                        doc_id=doc_id,
+                        owner_id=owner_id,
+                        title=doc_id,
+                        filename=filename,
+                        pdf_object_key=pdf_key,
+                        artifact_prefix=artifact_prefix,
+                        status=doc_status,
+                        task_id=task_id,
+                        chunk_count=chunk_count,
+                    )
+                except Exception as e:
+                    logger.warning("[db] 回填 document 失败 %s/%s: %s", collection, doc_id, e)
 
     # flush 一次, 让列表 row_count 立即反映新灌入的数据
     try:
@@ -239,7 +284,7 @@ async def ingest_upload(
     collection: str = Form(...),
     backend: str = Form(None),
     files: List[UploadFile] = File(...),
-    _auth: str = Depends(require_auth),
+    auth: AuthContext = Depends(require_auth),
 ) -> TaskResponse:
     """上传 PDF + 自动灌入到指定知识库 (异步任务)。
 
@@ -260,6 +305,17 @@ async def ingest_upload(
     # 直接带 (中文) 集合名上传时, 若尚无元数据则补写显示名, 保证列表回显原名而非 slug。
     if not os.path.isfile(_kb_meta_path(kb_dir)):
         _write_kb_meta(kb_dir, (collection or "").strip(), safe_collection)
+    if repo.available():
+        meta = repo.get_collection(safe_collection)
+        if meta is None:
+            repo.upsert_collection(
+                name=safe_collection,
+                display_name=(collection or "").strip(),
+                auth=auth,
+                visibility="private",
+            )
+        else:
+            require_write(auth, meta)
 
     # 查询该集合中已入库的 doc_id, 用于按文件名跳过 (best-effort, 失败则不跳过)
     pipe = get_pipeline()
@@ -289,7 +345,31 @@ async def ingest_upload(
         content = await f.read()
         with open(save_path, "wb") as out:
             out.write(content)
-        items.append((save_path, doc_dir))
+        pdf_key = None
+        artifact_prefix = object_store.document_prefix(safe_collection, doc_stem)
+        if object_store.configured():
+            try:
+                pdf_key = object_store.pdf_object_key(safe_collection, doc_stem)
+                object_store.get_object_store().upload_bytes(
+                    content,
+                    pdf_key,
+                    content_type=f.content_type or "application/pdf",
+                )
+            except Exception as e:
+                logger.warning("[object-store] 上传原始 PDF 失败 %s: %s", save_path, e)
+        if repo.available():
+            repo.upsert_document(
+                collection_name=safe_collection,
+                doc_id=doc_stem,
+                owner_id=auth.user_id,
+                title=doc_stem,
+                filename=f.filename,
+                pdf_object_key=pdf_key,
+                artifact_prefix=artifact_prefix,
+                status="parsing",
+                chunk_count=0,
+            )
+        items.append((save_path, doc_dir, doc_stem, f.filename or doc_stem, auth.user_id, pdf_key, artifact_prefix))
         logger.info(f"[ingest-upload] 已保存: {save_path} ({len(content)} bytes)")
 
     if skipped_existing:

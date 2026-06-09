@@ -6,12 +6,15 @@ import type {
   DocSummaryResponse,
   DocumentInfo,
   HealthResponse,
+  PdfUrlResponse,
+  ResourceCopyResponse,
   SkillListResponse,
   SkillSpec,
   StatsResponse,
   StreamEvent,
   TaskResponse,
   Visibility,
+  ConversationShareResponse,
 } from './types'
 
 const API_PREFIX = '/api/v1'
@@ -116,6 +119,16 @@ export class ApiClient {
     if (!res.ok) await handle(res)
   }
 
+  async copyCollectionToMine(id: string): Promise<ResourceCopyResponse> {
+    return handle(
+      await fetch(this.url('/collections/copy-to-mine'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ id }),
+      }),
+    )
+  }
+
   /** 列出某库下文献（后端 M5；当前后端可能未实现 → 调用方 try/catch 降级）。 */
   async listDocuments(collection: string): Promise<DocumentInfo[]> {
     const res = await fetch(
@@ -135,6 +148,20 @@ export class ApiClient {
       { method: 'DELETE', headers: await this.headers(false) },
     )
     if (!res.ok) await handle(res)
+  }
+
+  async getDocumentPdfUrl(
+    docId: string,
+    collection?: string | null,
+    expiresIn = 900,
+  ): Promise<PdfUrlResponse> {
+    return handle(
+      await fetch(this.url('/documents/pdf-url'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ doc_id: docId, collection, expires_in: expiresIn }),
+      }),
+    )
   }
 
   async uploadAndIngest(
@@ -198,6 +225,64 @@ export class ApiClient {
       body: JSON.stringify({ visibility }),
     })
     if (!res.ok) await handle(res)
+  }
+
+  async copySkillToMine(id: string): Promise<ResourceCopyResponse> {
+    return handle(
+      await fetch(this.url('/skills/copy-to-mine'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ id }),
+      }),
+    )
+  }
+
+  // ── 对话分享 ─────────────────────────────────────────────
+  async shareConversation(conversationId: string): Promise<ConversationShareResponse> {
+    return handle(
+      await fetch(this.url('/conversations/share'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ conversation_id: conversationId }),
+      }),
+    )
+  }
+
+  async unshareConversation(conversationId: string): Promise<void> {
+    const res = await fetch(this.url('/conversations/unshare'), {
+      method: 'POST',
+      headers: await this.headers(),
+      body: JSON.stringify({ conversation_id: conversationId }),
+    })
+    if (!res.ok) await handle(res)
+  }
+
+  async getSharedConversation(token: string): Promise<{ conversation: unknown }> {
+    return handle(
+      await fetch(this.url('/conversations/shared/get'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ token }),
+      }),
+    )
+  }
+
+  async getConversation(conversationId: string): Promise<{ conversation: unknown }> {
+    return handle(
+      await fetch(this.url(`/conversations/${encodeURIComponent(conversationId)}`), {
+        headers: await this.headers(false),
+      }),
+    )
+  }
+
+  async copySharedConversationToMine(token: string): Promise<{ conversation_id: string }> {
+    return handle(
+      await fetch(this.url('/conversations/copy-to-mine'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ token }),
+      }),
+    )
   }
 
   // ── 流式问答（带 token 的 fetch + ReadableStream） ──────

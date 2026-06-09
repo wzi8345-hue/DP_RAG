@@ -28,14 +28,19 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..deps import get_pipeline, get_task_store, require_auth
+from ..authz import require_read, require_write
+from ..deps import AuthContext, get_pipeline, get_task_store, require_auth
 from ..models import (
     CollectionInfo,
     CollectionsListResponse,
     CreateCollectionRequest,
     DeleteCollectionResponse,
+    ResourceCopyRequest,
+    ResourceCopyResponse,
     TaskResponse,
+    VisibilityRequest,
 )
+from ...db import repo
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +196,7 @@ def _list_disk_kbs(prefix: str) -> List[str]:
 @router.get("/collections", response_model=CollectionsListResponse)
 def list_collections(
     prefix: str = _KB_PREFIX,
-    _auth: str = Depends(require_auth),
+    auth: AuthContext = Depends(require_auth),
 ) -> CollectionsListResponse:
     """列出知识库集合: 默认库 literature_chunks + kb_* 集合 ∪ 本地 kb_* 工作目录。"""
     pipe = get_pipeline()
@@ -214,16 +219,43 @@ def list_collections(
     for name in _list_disk_kbs(prefix):
         by_name.setdefault(name, {"name": name, "row_count": 0})
 
+    db_meta: Dict[str, Any] = {}
+    if repo.available():
+        # 先为本地 legacy kb 补齐 metadata（归当前登录用户），然后按可读列表覆盖元信息。
+        for name in list(by_name):
+            if name != default_coll and name.startswith(_KB_PREFIX) and repo.get_collection(name) is None:
+                kb_dir = kb_workspace_dir(name)
+                fallback = name[len(_KB_PREFIX):]
+                repo.upsert_collection(
+                    name=name,
+                    display_name=_read_display_name(kb_dir, fallback),
+                    auth=auth,
+                )
+        db_meta = {c.name: c for c in repo.list_collections(auth)}
+        for c in db_meta.values():
+            by_name.setdefault(c.name, {"name": c.name, "row_count": 0})
+
     # 4) 补充每个库的本地文档数 + 显示名
     collections = []
     for name, info in sorted(by_name.items()):
+        if repo.available() and name != default_coll and name not in db_meta:
+            continue
         kb_dir = kb_workspace_dir(name)
         info["doc_count"] = _disk_doc_count(kb_dir)
         if name == default_coll:
             info["display_name"] = "默认知识库"
+            info["visibility"] = "public"
+            info["mine"] = False
         else:
             fallback = name[len(_KB_PREFIX):] if name.startswith(_KB_PREFIX) else name
             info["display_name"] = _read_display_name(kb_dir, fallback)
+            meta = db_meta.get(name)
+            if meta:
+                info["display_name"] = meta.display_name or info["display_name"]
+                info["owner_id"] = meta.owner_id
+                info["org_id"] = meta.org_id
+                info["visibility"] = meta.visibility
+                info["mine"] = meta.owner_id == auth.user_id
         collections.append(CollectionInfo(**info))
 
     return CollectionsListResponse(collections=collections)
@@ -232,7 +264,7 @@ def list_collections(
 @router.post("/collections", response_model=CollectionInfo)
 def create_collection(
     req: CreateCollectionRequest,
-    _auth: str = Depends(require_auth),
+    auth: AuthContext = Depends(require_auth),
 ) -> CollectionInfo:
     """新建一个空知识库: 创建本地工作目录, 立即出现在列表中。
 
@@ -244,14 +276,31 @@ def create_collection(
     kb_dir = kb_workspace_dir(name)
     os.makedirs(kb_dir, exist_ok=True)
     _write_kb_meta(kb_dir, display_name, name)
+    meta = None
+    if repo.available():
+        meta = repo.upsert_collection(
+            name=name,
+            display_name=display_name,
+            auth=auth,
+            visibility=req.visibility,
+        )
     logger.info(f"[collections] 已创建知识库 {name} (显示名: {display_name})")
-    return CollectionInfo(name=name, display_name=display_name, row_count=0, doc_count=0)
+    return CollectionInfo(
+        name=name,
+        display_name=display_name,
+        row_count=0,
+        doc_count=0,
+        owner_id=meta.owner_id if meta else auth.user_id,
+        org_id=meta.org_id if meta else auth.org_id,
+        visibility=meta.visibility if meta else req.visibility,
+        mine=True,
+    )
 
 
 @router.delete("/collections/{name}", response_model=DeleteCollectionResponse)
 def delete_collection(
     name: str,
-    _auth: str = Depends(require_auth),
+    auth: AuthContext = Depends(require_auth),
 ) -> DeleteCollectionResponse:
     """删除一个知识库: 删 Milvus 集合 + 连带清理本地工作目录 (中间产物/原始 PDF)。"""
     if not name.startswith(_KB_PREFIX):
@@ -260,6 +309,10 @@ def delete_collection(
             detail=f"仅允许删除 {_KB_PREFIX} 前缀的集合, "
                    f"默认集合 literature_chunks 不可通过此接口删除",
         )
+    if repo.available():
+        meta = repo.get_collection(name)
+        if meta:
+            require_write(auth, meta)
     pipe = get_pipeline()
     deleted = pipe.drop_collection(name)
 
@@ -272,6 +325,8 @@ def delete_collection(
             logger.info(f"[collections] 已清理本地工作目录: {kb_dir}")
         except Exception as e:
             logger.warning(f"[collections] 清理本地目录失败 {kb_dir}: {e}")
+    if repo.available():
+        repo.delete_collection_metadata(name, auth)
 
     return DeleteCollectionResponse(deleted=deleted, name=name)
 
@@ -329,3 +384,102 @@ def rebuild_collection(
     tid = uuid.uuid4().hex[:16]
     task_store.submit(_rebuild_collection, tid, name, kb_dir, task_id=tid)
     return TaskResponse(id=tid, status="pending", created_at=time.time())
+
+
+@router.patch("/collections/{name}/visibility")
+def set_collection_visibility(
+    name: str,
+    req: VisibilityRequest,
+    auth: AuthContext = Depends(require_auth),
+) -> dict:
+    if not repo.available():
+        raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    updated = repo.update_collection_visibility(name, req.visibility, auth)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="未找到可写的知识库")
+    return {"updated": True, "name": name, "visibility": updated.visibility}
+
+
+@router.get("/collections/{name}/documents")
+def list_collection_documents(
+    name: str,
+    auth: AuthContext = Depends(require_auth),
+) -> dict:
+    if not repo.available():
+        return {"documents": []}
+    meta = repo.get_collection(name)
+    if meta is None:
+        return {"documents": []}
+    require_read(auth, meta)
+    docs = repo.list_documents(name, auth)
+    return {"documents": [d.model_dump(mode="json") for d in docs]}
+
+
+@router.delete("/collections/{name}/documents/{doc_id}")
+def delete_collection_document(
+    name: str,
+    doc_id: str,
+    auth: AuthContext = Depends(require_auth),
+) -> dict:
+    if not repo.available():
+        raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    meta = repo.get_collection(name)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    require_write(auth, meta)
+    deleted = repo.delete_document(name, doc_id, auth)
+    doc_dir = os.path.join(kb_workspace_dir(name), sanitized_doc_stem(doc_id))
+    if os.path.isdir(doc_dir):
+        shutil.rmtree(doc_dir, ignore_errors=True)
+    return {"deleted": deleted}
+
+
+@router.post("/collections/copy-to-mine", response_model=ResourceCopyResponse)
+def copy_collection_to_mine(
+    req: ResourceCopyRequest,
+    auth: AuthContext = Depends(require_auth),
+) -> ResourceCopyResponse:
+    if not repo.available():
+        raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    source = repo.get_collection(req.id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    require_read(auth, source)
+    if source.owner_id == auth.user_id:
+        return ResourceCopyResponse(id=source.name, name=source.display_name)
+
+    suffix = uuid.uuid4().hex[:8]
+    base = source.name[len(_KB_PREFIX):] if source.name.startswith(_KB_PREFIX) else source.name
+    target = make_collection_slug(f"{base}_copy_{suffix}")
+    target_display = f"{source.display_name or base} copy"
+    repo.upsert_collection(name=target, display_name=target_display, auth=auth, visibility="private")
+
+    source_dir = kb_workspace_dir(source.name)
+    target_dir = kb_workspace_dir(target)
+    if os.path.isdir(source_dir):
+        shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+        _write_kb_meta(target_dir, target_display, target)
+    else:
+        os.makedirs(target_dir, exist_ok=True)
+        _write_kb_meta(target_dir, target_display, target)
+
+    for d in repo.list_documents(source.name, auth):
+        repo.upsert_document(
+            collection_name=target,
+            doc_id=d.doc_id,
+            owner_id=auth.user_id,
+            title=d.title,
+            filename=d.filename,
+            year=d.year,
+            pdf_object_key=d.pdf_object_key,
+            artifact_prefix=d.artifact_prefix,
+            source_document_id=d.id,
+            status=d.status,
+            chunk_count=d.chunk_count,
+        )
+
+    if os.path.isdir(target_dir) and _disk_doc_count(target_dir) > 0:
+        task_store = get_task_store()
+        tid = uuid.uuid4().hex[:16]
+        task_store.submit(_rebuild_collection, tid, target, target_dir, task_id=tid)
+    return ResourceCopyResponse(id=target, name=target_display)

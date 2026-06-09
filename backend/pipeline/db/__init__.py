@@ -10,6 +10,7 @@
 from .base import close_pool, configured, connection, cursor, get_pool, init_db
 from .models import (
     Conversation,
+    ConversationShare,
     Document,
     KbCollection,
     Message,
@@ -24,6 +25,7 @@ __all__ = [
     "init_db",
     "close_pool",
     "Conversation",
+    "ConversationShare",
     "Document",
     "KbCollection",
     "Message",

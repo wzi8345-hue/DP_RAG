@@ -41,6 +41,23 @@ const form = reactive<SkillForm>({
 })
 
 const selected = computed(() => skills.value.find((s) => s.id === selectedId.value) || null)
+const groupedSkills = computed(() => [
+  {
+    key: 'public',
+    label: t('common.public'),
+    items: skills.value.filter((s) => s.visibility === 'public' && !s.mine),
+  },
+  {
+    key: 'org',
+    label: t('common.org'),
+    items: skills.value.filter((s) => s.visibility === 'org' && !s.mine),
+  },
+  {
+    key: 'mine',
+    label: t('common.mine'),
+    items: skills.value.filter((s) => s.mine || s.visibility === 'private'),
+  },
+])
 
 async function load() {
   loading.value = true
@@ -125,11 +142,29 @@ async function remove(s: SkillSummary) {
 
 async function toggleVisibility(s: SkillSummary) {
   try {
-    await api.setSkillVisibility(s.id, s.visibility === 'org' ? 'private' : 'org')
+    const next = s.visibility === 'private' ? 'org' : s.visibility === 'org' ? 'public' : 'private'
+    await api.setSkillVisibility(s.id, next)
     await load()
   } catch {
     alert('后端暂未支持可见性设置（待 M5）')
   }
+}
+
+async function copyToMine(s: SkillSummary) {
+  try {
+    const copied = await api.copySkillToMine(s.id)
+    await load()
+    selectedId.value = copied.id
+    editing.value = false
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
+function visibilityLabel(v?: string): string {
+  if (v === 'public') return t('common.public')
+  if (v === 'org') return t('common.org')
+  return t('common.private')
 }
 </script>
 
@@ -151,23 +186,41 @@ async function toggleVisibility(s: SkillSummary) {
       <div class="min-h-0 flex-1 overflow-y-auto p-2">
         <p v-if="loading" class="px-2 py-4 text-center text-xs text-faint">{{ t('common.loading') }}</p>
         <p v-else-if="skills.length === 0" class="px-2 py-6 text-center text-xs text-faint">{{ t('skills.empty') }}</p>
-        <div
-          v-for="s in skills"
-          :key="s.id"
-          class="mb-0.5 flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-2 transition-colors"
-          :class="selectedId === s.id && !editing ? 'bg-active hover:bg-active-hover' : 'hover:bg-hover'"
-          @click="selectedId = s.id; editing = false"
-        >
-          <span class="i-lucide-puzzle shrink-0 text-muted" />
-          <div class="min-w-0 flex-1">
-            <div class="truncate text-sm text-base">{{ s.name }}</div>
-            <div class="flex items-center gap-1 text-[10px] text-faint">
-              <span class="chip !px-1 !py-0">{{ s.editable ? t('skills.editable') : t('skills.builtin') }}</span>
-              <span>P{{ s.priority }}</span>
-              <span v-if="s.visibility === 'org'" class="chip !px-1 !py-0 text-accent">{{ t('common.org') }}</span>
-            </div>
+        <template v-for="group in groupedSkills" :key="group.key">
+          <div v-if="group.items.length" class="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-faint">
+            {{ group.label }}
           </div>
-        </div>
+          <div
+            v-for="s in group.items"
+            :key="s.id"
+            class="group mb-0.5 flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-2 transition-colors"
+            :class="selectedId === s.id && !editing ? 'bg-active hover:bg-active-hover' : 'hover:bg-hover'"
+            @click="selectedId = s.id; editing = false"
+          >
+            <span class="i-lucide-puzzle shrink-0 text-muted" />
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-sm text-base">{{ s.name }}</div>
+              <div class="flex items-center gap-1 text-[10px] text-faint">
+                <span class="chip !px-1 !py-0">{{ s.editable ? t('skills.editable') : t('skills.builtin') }}</span>
+                <span>P{{ s.priority }}</span>
+                <span class="chip !px-1 !py-0 text-accent">{{ visibilityLabel(s.visibility) }}</span>
+              </div>
+            </div>
+            <NButton
+              v-if="!s.mine"
+              class="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+              quaternary
+              circle
+              size="tiny"
+              :title="t('common.copyToMine')"
+              @click.stop="copyToMine(s)"
+            >
+              <template #icon>
+                <span class="i-lucide-copy-plus text-xs" />
+              </template>
+            </NButton>
+          </div>
+        </template>
       </div>
     </div>
     </template>
@@ -236,9 +289,9 @@ async function toggleVisibility(s: SkillSummary) {
             <p class="mt-0.5 text-sm text-muted">{{ selected.description || '—' }}</p>
           </div>
           <div class="flex items-center gap-2">
-            <template v-if="selected.editable">
+            <template v-if="selected.editable && selected.mine !== false">
               <NButton tertiary size="small" @click="toggleVisibility(selected)">
-                {{ selected.visibility === 'org' ? t('library.makePrivate') : t('library.makePublic') }}
+                {{ visibilityLabel(selected.visibility) }}
               </NButton>
               <NButton tertiary size="small" @click="startEdit(selected)">
                 <template #icon>
@@ -253,6 +306,9 @@ async function toggleVisibility(s: SkillSummary) {
                 {{ t('common.delete') }}
               </NButton>
             </template>
+            <NButton v-else-if="selected.mine === false" tertiary size="small" @click="copyToMine(selected)">
+              {{ t('common.copyToMine') }}
+            </NButton>
             <span v-else class="chip">{{ t('skills.builtin') }}</span>
           </div>
         </div>

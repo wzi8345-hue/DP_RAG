@@ -5,29 +5,153 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Optional
+import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from ..deps import get_pipeline, get_session_store, require_auth
+from ..authz import require_read
+from ..deps import AuthContext, get_pipeline, get_session_store, require_auth
 from ..models import ChatRequest, ChatResponse
 from ..session_logger import clear_session_log_context, set_session_log_context
-from ...flows.query import ChatSession
+from ...db import repo
+from ...db.models import Message
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
+def _ensure_collection_readable(collection: str | None, auth: AuthContext) -> None:
+    if not collection or not repo.available():
+        return
+    meta = repo.get_collection(collection)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="知识库不存在或不可读")
+    require_read(auth, meta)
+
+
+def _apply_skill_scope(auth: AuthContext) -> None:
+    if not repo.available():
+        return
+    pipe = get_pipeline()
+    readable_ids = sorted({s.id for s in repo.list_skill_metadata(auth)})
+    prof = (pipe.config.retrieval.get("langgraph", {}) or {}).setdefault("professional", {})
+    skills_cfg = prof.setdefault("skills", {})
+    if skills_cfg.get("allowed_ids") == readable_ids:
+        return
+    skills_cfg["allowed_ids"] = readable_ids
+    try:
+        pipe._get_query_flow().reload_skills()
+    except Exception:
+        pass
+
+
+def _conversation_for_turn(req: ChatRequest, auth: AuthContext) -> tuple[str | None, str | None]:
+    """Return (conversation_id, parent_message_id) for the next user message."""
+    if not repo.available():
+        return req.conversation_id, req.parent_message_id
+    conv_id = req.conversation_id or f"c_{uuid.uuid4().hex[:16]}"
+    conv = repo.get_conversation(conv_id)
+    parent_id = req.parent_message_id
+    title = req.query.strip().replace("\n", " ")[:48]
+    if conv is None:
+        repo.upsert_conversation(conversation_id=conv_id, auth=auth, title=title)
+        return conv_id, parent_id
+    if conv.owner_id == auth.user_id:
+        return conv.id, parent_id
+    require_read(auth, conv)
+    copied = repo.copy_conversation_mainline_to_owner(conv.id, auth)
+    return copied.id, copied.active_leaf_message_id
+
+
+def _persist_user_message(
+    *,
+    conversation_id: str | None,
+    user_message_id: str | None,
+    parent_id: str | None,
+    query: str,
+    params: dict,
+) -> str | None:
+    if not repo.available() or not conversation_id:
+        return user_message_id
+    mid = user_message_id or f"m_{uuid.uuid4().hex[:16]}"
+    repo.upsert_message(
+        Message(
+            id=mid,
+            conversation_id=conversation_id,
+            parent_id=parent_id,
+            role="user",
+            content=query,
+            params=params,
+            status="done",
+        )
+    )
+    return mid
+
+
+def _persist_assistant_message(
+    *,
+    conversation_id: str | None,
+    assistant_message_id: str | None,
+    user_message_id: str | None,
+    result: dict,
+    status: str = "done",
+    error: str | None = None,
+    session_id: str | None = None,
+) -> str | None:
+    if not repo.available() or not conversation_id or not user_message_id:
+        return assistant_message_id
+    mid = assistant_message_id or f"m_{uuid.uuid4().hex[:16]}"
+    repo.upsert_message(
+        Message(
+            id=mid,
+            conversation_id=conversation_id,
+            parent_id=user_message_id,
+            role="assistant",
+            content=result.get("answer", ""),
+            hits=result.get("hits") or [],
+            context=result.get("context"),
+            research=result.get("research"),
+            usage=result.get("usage"),
+            latency_s=result.get("latency_s"),
+            status=status,
+            error=error,
+        )
+    )
+    # Keep active leaf and pipeline session id aligned with the latest assistant node.
+    conv = repo.get_conversation(conversation_id)
+    if conv:
+        repo.upsert_conversation(
+            conversation_id=conversation_id,
+            auth=AuthContext(user_id=conv.owner_id, org_id=conv.org_id),
+            title=conv.title,
+            active_leaf_message_id=mid,
+            session_id=session_id,
+            forked_from=conv.forked_from,
+        )
+    return mid
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     req: ChatRequest,
-    _auth: str = Depends(require_auth),
+    auth: AuthContext = Depends(require_auth),
 ) -> ChatResponse:
     """多轮对话: 检索 + 生成, 返回完整结果。"""
     pipe = get_pipeline()
     store = get_session_store()
+    _ensure_collection_readable(req.collection, auth)
+    if req.professional:
+        _apply_skill_scope(auth)
+    conversation_id, parent_id = _conversation_for_turn(req, auth)
+    user_message_id = _persist_user_message(
+        conversation_id=conversation_id,
+        user_message_id=req.client_user_message_id,
+        parent_id=parent_id,
+        query=req.query,
+        params=req.model_dump(exclude={"query"}),
+    )
 
     # 获取或创建会话
     session_id = req.session_id
@@ -60,7 +184,7 @@ async def chat(
 
     clear_session_log_context()
 
-    return ChatResponse(
+    response = ChatResponse(
         query=result.query,
         answer=result.answer,
         hits=result.hits,
@@ -76,12 +200,22 @@ async def chat(
         correlation_id=result.correlation_id,
         research=result.research,
     )
+    _persist_assistant_message(
+        conversation_id=conversation_id,
+        assistant_message_id=req.client_assistant_message_id,
+        user_message_id=user_message_id,
+        result=response.model_dump(),
+        status="failed" if result.error else "done",
+        error=result.error,
+        session_id=session_id,
+    )
+    return response
 
 
 @router.post("/chat/stream")
 async def chat_stream(
     req: ChatRequest,
-    _auth: str = Depends(require_auth),
+    auth: AuthContext = Depends(require_auth),
 ) -> StreamingResponse:
     """SSE 流式对话: 检索完成后逐块推送 LLM 输出。
 
@@ -100,6 +234,17 @@ async def chat_stream(
     """
     pipe = get_pipeline()
     store = get_session_store()
+    _ensure_collection_readable(req.collection, auth)
+    if req.professional:
+        _apply_skill_scope(auth)
+    conversation_id, parent_id = _conversation_for_turn(req, auth)
+    user_message_id = _persist_user_message(
+        conversation_id=conversation_id,
+        user_message_id=req.client_user_message_id,
+        parent_id=parent_id,
+        query=req.query,
+        params=req.model_dump(exclude={"query"}),
+    )
 
     # 切换目标集合 (collection=None/空 → 回退原始默认库 literature_chunks)。
     # 必须经 pipeline 统一切换: stream_chat_events 自身无法感知"原始默认库",
@@ -137,6 +282,18 @@ async def chat_stream(
                 # 把 session_id 注入 done 事件, 前端据此在流式模式下也能维持多轮
                 if event.get("type") == "done":
                     event["session_id"] = final_session_id
+                    if conversation_id:
+                        event["conversation_id"] = conversation_id
+                    assistant_id = _persist_assistant_message(
+                        conversation_id=conversation_id,
+                        assistant_message_id=req.client_assistant_message_id,
+                        user_message_id=user_message_id,
+                        result=event,
+                        status="done",
+                        session_id=final_session_id,
+                    )
+                    if assistant_id:
+                        event["message_id"] = assistant_id
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
                 # 流式完成后更新会话
@@ -151,6 +308,15 @@ async def chat_stream(
 
         except Exception as e:
             logger.exception("[chat/stream] 生成器异常")
+            _persist_assistant_message(
+                conversation_id=conversation_id,
+                assistant_message_id=req.client_assistant_message_id,
+                user_message_id=user_message_id,
+                result={"answer": "", "hits": []},
+                status="failed",
+                error=str(e),
+                session_id=session_id,
+            )
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
         finally:
             clear_session_log_context()

@@ -33,7 +33,14 @@ export function useChat() {
   const busy = ref(false)
   let abort: AbortController | null = null
 
-  function buildRequest(conv: Conversation, query: string, c: ComposerState): ChatRequest {
+  function buildRequest(
+    conv: Conversation,
+    query: string,
+    c: ComposerState,
+    userMessageId: string,
+    assistantMessageId: string,
+  ): ChatRequest {
+    const userMessage = conv.messages[userMessageId]
     return {
       query,
       session_id: conv.sessionId,
@@ -45,6 +52,10 @@ export function useChat() {
       collection: c.collection || null,
       doc_ids: c.docIds.length > 0 ? c.docIds : null,
       sources: c.sources,
+      conversation_id: conv.id,
+      parent_message_id: userMessage?.parentId ?? null,
+      client_user_message_id: userMessageId,
+      client_assistant_message_id: assistantMessageId,
     }
   }
 
@@ -53,7 +64,13 @@ export function useChat() {
     return expert ? t('chat.statusResearching') : t('chat.statusRetrieving')
   }
 
-  async function run(conv: Conversation, assistantId: string, query: string, c: ComposerState) {
+  async function run(
+    conv: Conversation,
+    userMessageId: string,
+    assistantId: string,
+    query: string,
+    c: ComposerState,
+  ) {
     busy.value = true
     abort = new AbortController()
     store.patch(conv, assistantId, {
@@ -104,7 +121,7 @@ export function useChat() {
     }
 
     try {
-      await api.chatStream(buildRequest(conv, query, c), onEvent, abort.signal)
+      await api.chatStream(buildRequest(conv, query, c, userMessageId, assistantId), onEvent, abort.signal)
       const m = conv.messages[assistantId]
       if (m && m.status === 'streaming') store.patch(conv, assistantId, { status: 'done', stage: undefined })
     } catch (e) {
@@ -127,8 +144,8 @@ export function useChat() {
 
   async function send(conv: Conversation, query: string, c: ComposerState) {
     if (busy.value || !query.trim()) return
-    const { assistantId } = store.appendTurn(conv, query.trim(), c.professional)
-    await run(conv, assistantId, query.trim(), c)
+    const { userId, assistantId } = store.appendTurn(conv, query.trim(), c.professional)
+    await run(conv, userId, assistantId, query.trim(), c)
   }
 
   async function regenerate(conv: Conversation, assistantId: string, c: ComposerState) {
@@ -138,13 +155,13 @@ export function useChat() {
     const userMsg = conv.messages[msg.parentId]
     if (!userMsg) return
     const newId = store.regenerate(conv, assistantId, c.professional)
-    if (newId) await run(conv, newId, userMsg.content, c)
+    if (newId) await run(conv, userMsg.id, newId, userMsg.content, c)
   }
 
   async function editAndResend(conv: Conversation, userId: string, newContent: string, c: ComposerState) {
     if (busy.value || !newContent.trim()) return
     const forked = store.forkUser(conv, userId, newContent.trim(), c.professional)
-    if (forked) await run(conv, forked.assistantId, newContent.trim(), c)
+    if (forked) await run(conv, forked.userId, forked.assistantId, newContent.trim(), c)
   }
 
   function stop() {

@@ -3,7 +3,7 @@
 > 本文件与 [`DEV_PLAN.md`](./DEV_PLAN.md) 是项目的两份源真相文档。**任何开发首先参考这两份文档**；每一步推进都必须 review 并更新它们。
 >
 > - 适用版本：sci-loop 多用户重构（Logto 鉴权 + Vue 前端 + Postgres 消息树）
-> - 最近更新：2026-06-08
+> - 最近更新：2026-06-09
 
 ---
 
@@ -12,7 +12,7 @@
 把原 DP-RAG（单用户、API Key 鉴权、React 前端）改造为**多用户科学知识问答平台**：
 
 - 使用 **Logto** 完成用户登录与鉴权（OIDC + API Resource JWT）。
-- **数据按用户隔离**：文献库、对话、skill 默认私有；用户可主动设为「组织内部可读（org-public）」共享。
+- **数据按用户隔离**：文献库、对话、skill 默认私有；用户可主动设为「组织内部可读（org）」或「平台公开可读（public）」。
 - 前端用 **Vue 3 全量重写**，风格类 Vercel 控制台（轻量、平铺、低视觉噪音）。
 - 重新分层：`frontend/`、`backend/`、`deploy/`。
 - 预留**多检索源**接口：当前仅文献库 RAG，后续接入企业内部材料数据库（Postgres / SQL）。
@@ -52,7 +52,7 @@ DP_RAG/
 │   ├── uno.config.ts / vite.config.ts / package.json
 │   └── Dockerfile
 └── deploy/
-    ├── docker-compose.yaml  # backend + postgres + (milvus 外部)
+    ├── docker-compose.yaml  # backend + postgres + RustFS + (milvus 外部)
     └── .env.example
 ```
 
@@ -103,13 +103,14 @@ DP_RAG/
 
 - `owner_id`（Logto `sub`）
 - `org_id`（可空）
-- `visibility`：`private`（默认，仅 owner）/ `org`（组织内部可读）
+- `visibility`：`private`（默认，仅 owner）/ `org`（组织内部可读）/ `public`（平台所有用户可读）
 
 访问规则：
 
-- **读**：`owner_id == me` 或（`visibility == org` 且 `org_id == my_org`）。
+- **读**：`owner_id == me` 或（`visibility == org` 且 `org_id == my_org`）或 `visibility == public`。
 - **写/删**：仅 `owner_id == me`。
-- 列表接口返回 `private(mine) ∪ org-public(my_org)`，并标注 `mine: bool` 与 `visibility`。
+- 列表接口返回 `private(mine) ∪ org(my_org) ∪ public`，并标注 `mine: bool` 与 `visibility`。
+- 对话分享链接与 `visibility` 解耦：`conversation_shares` 记录不透明 token；撤销后 token 失效。其他用户通过分享继续对话时，后端复制当前主线为自己的私有对话（`forked_from` 仅审计），后续新轮次只使用新 owner 可读的文献库与 skill。
 
 ---
 
@@ -126,9 +127,10 @@ conversations
   id              uuid pk
   owner_id        text            -- Logto sub
   org_id          text null
-  visibility      text            -- private | org
+  visibility      text            -- private | org | public
   title           text
   active_leaf_message_id uuid null
+  forked_from     text null       -- copy-on-continue 来源，仅审计
   created_at / updated_at timestamptz
 
 messages
@@ -173,7 +175,7 @@ kb_collections
   display_name    text
   owner_id        text
   org_id          text null
-  visibility      text            -- private | org
+  visibility      text            -- private | org | public
   created_at / updated_at
 ```
 
@@ -190,6 +192,9 @@ documents
   title           text
   filename        text
   year            int null
+  pdf_object_key  text null       -- RustFS/S3 原始 PDF
+  artifact_prefix text null       -- RustFS/S3 解析产物前缀 <collection>/<doc_id>/
+  source_document_id text null    -- copy-to-mine 来源
   status          text            -- parsing | ready | failed
   task_id         text null       -- 关联异步灌入任务
   chunk_count     int
@@ -207,9 +212,31 @@ user_skills
   org_id          text null
   visibility      text
   name / description
+  source_owner_id / source_skill_id text null -- copy-to-mine 来源
   created_at / updated_at
   (pk = owner_id + id)
 ```
+
+### 4.5 conversation_shares（分享链接）
+
+```text
+conversation_shares
+  token           text pk         -- 不透明随机串
+  conversation_id text fk -> conversations.id
+  owner_id        text
+  created_at      timestamptz
+  revoked_at      timestamptz null
+```
+
+分享链接只授予源对话的只读访问；撤销只让 token 失效，不影响已 copy-to-mine 的独立副本。
+
+### 4.6 对象存储（RustFS / S3 compatible）
+
+新增 `backend/pipeline/clients/object_store.py`，通过 `boto3` 连接自建 RustFS（S3 path-style + v4 签名）。用途：
+
+- 保存原始 PDF：`<collection>/<doc_id>/source.pdf`，供引用原文 tab 预签名访问。
+- 保存解析/向量/meta 产物：`<collection>/<doc_id>/...`，用于 rebuild / re-ingest，替代单机本地磁盘作为长期事实来源。
+- 前端不经后端转发大文件；后端 `POST /documents/pdf-url` 读权限校验后返回短期预签名 URL。
 
 ---
 
@@ -255,13 +282,14 @@ class RetrievalSource(Protocol):
 | 分组 | 端点 | 说明 | 变化 |
 |------|------|------|------|
 | 对话 | `POST /chat/stream`（SSE） | 流式问答（body 带 `parent_message_id`、`sources`、`doc_ids`） | 改造：落库消息树、断连续跑 |
-| 对话 | `POST /conversations/list` `/conversations/get` `/conversations/create` `/conversations/update` `/conversations/delete` | 会话 CRUD（含 visibility） | 新增 |
+| 对话 | `GET /conversations` `GET /conversations/{id}` `PATCH /conversations/{id}/visibility` | 会话列表/读取/可见性（过渡期兼容旧 REST；M9.6 统一 POST） | 新增 |
 | 对话 | `POST /conversations/append`（分叉重生成：`parent_message_id` / 编辑 user 文本） | 追加/分叉 | 新增 |
+| 对话 | `POST /conversations/share` `/conversations/unshare` `/conversations/shared/get` `/conversations/copy-to-mine` | 分享链接、撤销、公开只读读取、复制为个人副本 | 新增 |
 | 对话 | `POST /messages/stop`（body `message_id`） | 停止后台生成（不依赖前端连接） | 新增 |
 | 对话 | `GET /messages/{id}/stream`（SSE） | 重连续读正在生成消息的增量 | 新增 |
-| 文献 | `POST /collections/list` `/collections/create` `/collections/delete` `/collections/rebuild` `/collections/visibility` | 文献库 CRUD + 归属/可见性 | 改造 |
-| 文献 | `POST /ingest/upload`（multipart）`/documents/list` `/documents/delete` | 上传解析入库 + 文献增删查 | 改造/新增 |
-| 技能 | `POST /skills/list` `/skills/save` `/skills/delete` `/skills/visibility` `/skills/template` | skill CRUD + 可见性 | 改造 |
+| 文献 | `GET /collections` `POST /collections` `DELETE /collections/{name}` `POST /collections/{name}/rebuild` `PATCH /collections/{name}/visibility` | 文献库 CRUD + 归属/可见性（M9.6 统一 POST） | 改造 |
+| 文献 | `POST /ingest/upload`（multipart）`GET /collections/{name}/documents` `DELETE /collections/{name}/documents/{doc_id}` `POST /documents/pdf-url` `POST /collections/copy-to-mine` | 上传解析入库、文献增删查、PDF 预签名、复制到个人 | 改造/新增 |
+| 技能 | `GET /skills` `POST /skills` `DELETE /skills/{id}` `PATCH /skills/{id}/visibility` `POST /skills/copy-to-mine` `/skills/template` | skill CRUD + 可见性 + 复制到个人（M9.6 统一 POST） | 改造 |
 | 运维 | `GET /health` `GET /stats`；`POST /doc_summary` | 健康/统计免认证（GET）；doc_summary 业务接口（POST） | 保留/改造 |
 
 ### 6.1 SSE 事件协议（保持兼容并扩展）
@@ -307,7 +335,8 @@ Vue 3 · `<script setup>` · TypeScript · Vite 8 · pnpm · UnoCSS（含 preset
 - 选择文献库中的单篇文献（`doc_ids`）或整库；支持上传文献（上传后自动进入文献库管理）。
 - 开关：是否启用文献库检索、专家模式、Agentic、流式、检索源。
 - 停止生成、修改历史输入重生成（分叉）、正在生成时禁发新对话、前端断连后台继续。
-- 引用查看：有效引用文献角标可点击，查看文献简介（`/doc_summary`）与命中片段。
+- 引用查看：有效引用文献角标可点击，打开右侧「原文」tab；前端用 EmbedPDF 读取 `POST /documents/pdf-url` 返回的预签名 PDF URL，并按 `hit.page_start` 跳页。摘要与命中片段 tab 保留。
+- 数据权限 UX：Library/Skills 页按 public → org → mine 分组；非本人资源只读并提供「复制到我的」，副本是独立 private 资源，源 owner 撤销共享不影响副本。Chat 页可生成/撤销分享链接，`/s/:token` 公开只读展示，登录用户可继续对话并复制到个人。
 
 ---
 
@@ -317,7 +346,8 @@ Vue 3 · `<script setup>` · TypeScript · Vite 8 · pnpm · UnoCSS（含 preset
 浏览器 ──HTTPS──> rag.hal9k.one (GitHub Pages, 前端静态)
    │ access_token (Logto JWT, audience=sci-loop-api)
    └──HTTPS──> funmg.dp.tech/sci-loop-api (反代) ──> backend FastAPI :8080
-                                                       ├── Postgres (conversations/messages/归属)
+                                                       ├── Postgres (conversations/messages/归属/分享)
+                                                       ├── RustFS/S3 (PDF 原文 + 解析产物)
                                                        ├── Milvus (向量库)
                                                        └── LLM/Embedding/Reranker (内网)
 Logto: auth.dplink.cc (OIDC + JWKS)
@@ -344,7 +374,8 @@ GitHub Actions：
 
 见 [`deploy/.env.example`](./deploy/.env.example)。要点：
 
-- **后端服务/鉴权/存储**：`DATABASE_URL`、`LOGTO_ISSUER`、`LOGTO_JWKS_URI`、`LOGTO_AUDIENCE`、`LOGTO_REQUIRED_SCOPE`、`AUTH_DISABLED`、`CORS_ORIGINS`、`API_ROOT_PATH`、`UPLOAD_DIR`、`SESSION_DIR`。
+- **后端服务/鉴权/存储**：`DATABASE_URL`、`LOGTO_ISSUER`、`LOGTO_JWKS_URI`、`LOGTO_AUDIENCE`、`LOGTO_REQUIRED_SCOPE`、`AUTH_DISABLED`、`CORS_ORIGINS`、`API_ROOT_PATH`、`UPLOAD_DIR`、`SESSION_DIR`、`FRONTEND_BASE_URL`。
+- **对象存储（RustFS/S3）**：`OBJECT_STORE_ENDPOINT`、`OBJECT_STORE_PUBLIC_ENDPOINT`、`OBJECT_STORE_ACCESS_KEY`、`OBJECT_STORE_SECRET_KEY`、`OBJECT_STORE_BUCKET`、`OBJECT_STORE_REGION`。
 - **基建连接（pipeline，容器化的主要配置方式）**：通过环境变量覆盖 pipeline 配置，**镜像无需挂载 YAML**。加载优先级：`default_config.yaml < CONFIG_PATH 文件 < 环境变量 < 运行时`。映射表见 `backend/pipeline/config.py` 的 `_ENV_OVERRIDES`：
   - Embedding：`EMBEDDING_API_BASE` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL`
   - Milvus：`MILVUS_BACKEND` / `MILVUS_URI` / `MILVUS_TOKEN` / `MILVUS_DB_NAME` / `MILVUS_COLLECTION` / `MILVUS_DIM`
@@ -371,3 +402,5 @@ GitHub Actions：
 | 7 | 后端用 uv + ruff（弃 pip/requirements） | 统一依赖/虚拟环境与 lint/format；`pyproject.toml` + `uv.lock` |
 | 8 | DB 用 psycopg 3 + pydantic（弃 SQLAlchemy/Alembic） | 灵活使用 Postgres 高级查询；lifespan 自动建表；shell 全量备份 |
 | 9 | 业务接口统一 POST + `APIResponse{code,data,msg}` 封装 | 协议一致；SSE 与运维探针为例外 |
+| 10 | PDF 原文与解析产物进入 RustFS/S3 | 多副本后端可重建；前端引用原文用预签名 URL，避免后端转发大文件 |
+| 11 | 分享授权与副本解耦 | 撤销分享只影响源链接；copy-to-mine 后副本独立，后续问答使用新 owner 权限 |

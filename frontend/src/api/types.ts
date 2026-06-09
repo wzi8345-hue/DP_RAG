@@ -1,7 +1,7 @@
 // 镜像后端 pipeline/api/models.py 与计划中的对话消息树模型。
 
 export type RetrievalMode = 'hybrid' | 'vector' | 'metadata'
-export type Visibility = 'private' | 'org'
+export type Visibility = 'private' | 'org' | 'public'
 
 /** 检索源 key（预留多源：当前仅 literature，enterprise_sql 为占位）。 */
 export type RetrievalSourceKey = 'literature' | 'enterprise_sql'
@@ -60,6 +60,10 @@ export interface ChatRequest {
   /** 启用的检索源（预留多源融合） */
   sources?: RetrievalSourceKey[]
   stream?: boolean
+  conversation_id?: string | null
+  parent_message_id?: string | null
+  client_user_message_id?: string | null
+  client_assistant_message_id?: string | null
 }
 
 export interface ChatResponse {
@@ -111,6 +115,7 @@ export interface CollectionInfo {
   owner_id?: string
   visibility?: Visibility
   mine?: boolean
+  org_id?: string | null
 }
 
 export interface CollectionsListResponse {
@@ -127,10 +132,14 @@ export interface DocSummaryResponse {
 }
 
 export interface DocumentInfo {
+  id?: string
   doc_id: string
+  collection_name?: string
   title?: string
   filename?: string
   year?: number | null
+  pdf_object_key?: string | null
+  artifact_prefix?: string | null
   status?: 'parsing' | 'ready' | 'failed' | string
   chunk_count?: number
 }
@@ -165,6 +174,8 @@ export interface SkillSpec {
 export interface SkillSummary extends SkillSpec {
   priority: number
   editable: boolean
+  owner_id?: string | null
+  org_id?: string | null
   visibility?: Visibility
   mine?: boolean
 }
@@ -221,4 +232,25 @@ export interface Conversation {
   rootIds: string[]
   activeLeafId: string | null
   updatedAt: number
+  ownerId?: string | null
+  mine?: boolean
+  forkedFrom?: string | null
+  shareToken?: string | null
+}
+
+export interface PdfUrlResponse {
+  url: string
+  doc_id: string
+  collection: string
+  expires_in: number
+}
+
+export interface ConversationShareResponse {
+  token: string
+  url: string
+}
+
+export interface ResourceCopyResponse {
+  id: string
+  name?: string | null
 }

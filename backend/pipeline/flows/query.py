@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import logging
 import time
-import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -912,7 +911,6 @@ class QueryFlow:
             return self._research_agent
 
         from ..retrieval.research_agent import build_research_agent_from_pipeline
-        from ..retrieval.reflect_summary import ReflectSummaryConfig
         from ..clients.reranker import RerankerClient
 
         pipeline = self._get_agentic_pipeline()
@@ -974,6 +972,20 @@ class QueryFlow:
         skill_router_strong_min_hits = sk["router_strong_min_hits"]
         if sk["enabled"]:
             loaded_skills = load_skills(sk["dirs"])
+            allowed_ids = set(sk.get("allowed_ids") or [])
+            upload_dir = sk.get("upload_dir")
+            if allowed_ids and upload_dir:
+                import os as _os
+                upload_root = _os.path.realpath(upload_dir)
+                loaded_skills = {
+                    sid: skill
+                    for sid, skill in loaded_skills.items()
+                    if sid in allowed_ids
+                    or not (
+                        getattr(skill, "source_dir", None)
+                        and _os.path.realpath(skill.source_dir).startswith(upload_root)
+                    )
+                }
             skill_router_mode = sk["router_mode"]
 
         self._research_agent = build_research_agent_from_pipeline(
@@ -1203,7 +1215,6 @@ class QueryFlow:
         system_prompt = gen_cfg.get("system_prompt") or DEFAULT_AGENTIC_SYSTEM_PROMPT
         temperature = gen_cfg.get("temperature", 0)
         max_tokens = gen_cfg.get("max_tokens", 2048)
-        disable_thinking = bool(gen_cfg.get("disable_thinking", True))
 
         t0 = time.time()
         try:

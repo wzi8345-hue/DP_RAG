@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { NButton } from 'naive-ui'
+import { useApi } from '@/composables/useApi'
 import { useConversationsStore } from '@/stores/conversations'
 import { useChat, type ComposerState } from '@/composables/useChat'
 import { useSettings } from '@/composables/useSettings'
@@ -15,6 +17,7 @@ import SourcesPanel from '@/components/SourcesPanel.vue'
 
 const { t } = useI18n()
 const store = useConversationsStore()
+const api = useApi()
 const settings = useSettings()
 const chat = useChat()
 
@@ -32,8 +35,9 @@ const composer = reactive<ComposerState>({
 
 const threadRef = ref<HTMLElement | null>(null)
 const sourcesForId = ref<string | null>(null)
-const panelTab = ref<'summary' | 'chunks'>('summary')
+const panelTab = ref<'summary' | 'chunks' | 'pdf'>('summary')
 const highlightNum = ref<number | null>(null)
+const sharing = ref(false)
 
 onMounted(() => {
   store.load()
@@ -74,8 +78,30 @@ function openSources(msgId: string) {
 }
 function onCite(msgId: string, num: number) {
   sourcesForId.value = msgId
-  panelTab.value = 'summary'
+  panelTab.value = 'pdf'
   highlightNum.value = num
+}
+
+async function onShare() {
+  const conv = activeConv.value
+  if (!conv || sharing.value) return
+  sharing.value = true
+  try {
+    if (conv.shareToken) {
+      await api.unshareConversation(conv.id)
+      conv.shareToken = null
+      store.persist()
+      return
+    }
+    const share = await api.shareConversation(conv.id)
+    conv.shareToken = share.token
+    store.persist()
+    await navigator.clipboard?.writeText(share.url)
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e))
+  } finally {
+    sharing.value = false
+  }
 }
 
 const sourceItems = computed<SourceItem[]>(() => {
@@ -120,6 +146,18 @@ watch(
                 {{ activeConv.sessionId.slice(0, 8) }}
               </span>
             </div>
+            <NButton
+              v-if="activeConv && messages.length > 0"
+              quaternary
+              size="small"
+              :loading="sharing"
+              @click="onShare"
+            >
+              <template #icon>
+                <span :class="activeConv.shareToken ? 'i-lucide-unlink' : 'i-lucide-share-2'" />
+              </template>
+              {{ activeConv.shareToken ? t('chat.unshare') : t('chat.share') }}
+            </NButton>
           </header>
 
           <div ref="threadRef" class="min-h-0 flex-1 overflow-y-auto px-6 py-7">

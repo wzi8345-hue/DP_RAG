@@ -16,11 +16,11 @@
 | M1 | 前端脚手架（Vue 栈 + Logto + 布局/主题/i18n） | ☑ |
 | M2 | 前端核心页面（问答 / 文献管理 / skill / 设置） | ☑ |
 | M3 | 后端 Logto JWT 鉴权 + 用户上下文 | ☑ |
-| M4 | 后端 Postgres 消息树 + 对话 CRUD + 分叉重生成 | ◐ |
-| M5 | 文献库/skill 归属与可见性（org-public） | ◐ |
+| M4 | 后端 Postgres 消息树 + 对话 CRUD + 分叉重生成 | ☑ |
+| M5 | 文献库/skill 归属与可见性（private/org/public） | ☑ |
 | M6 | 「断连不停 + 重连续读 + 停止」生成解耦 | ☐ |
 | M7 | 多检索源抽象（literature 落地，SQL 预留） | ◐ |
-| M8 | 部署（docker-compose + Dockerfile）+ CI/CD | ☑ |
+| M8 | 部署（docker-compose + Dockerfile）+ CI/CD + RustFS 对象存储 | ☑ |
 | M9 | 基建与约定（uv/ruff · psycopg/pydantic · POST+APIResponse · 备份） | ◐ |
 
 > 说明：M2 前端页面已实现并通过 typecheck/build/test/lint；其中依赖后端的能力（单篇文献过滤 `doc_ids`、按库列文献/删文献、可见性切换、断连重连续读）前端已接好接口，等待对应后端阶段（M4/M5/M6）落地后端点即生效。
@@ -50,9 +50,9 @@
 - ☑ #2.2 问答页：发送/停止/编辑历史重生成（分叉）/正在生成禁发
 - ◐ #2.3 问答页：SSE（fetch+ReadableStream，带 token）✓；断连续读接口已接（`resumeMessageStream`），等待后端 M6
 - ☑ #2.4 问答页：选择单篇文献 / 整库 / 上传文献 / 检索开关 / 专家模式 / 检索源（doc 过滤待后端 M5）
-- ☑ #2.5 引用查看面板：有效引用文献角标点击 → 简介 + 命中片段
-- ☑ #2.6 文献管理页：库 CRUD + 文献上传解析入库 + 文献增删查（删除/列文献待后端 M5）+ 可见性入口
-- ☑ #2.7 skill 管理页：列表/新建/编辑/删除 + 可见性入口
+- ☑ #2.5 引用查看面板：有效引用文献角标点击 → 简介 + 命中片段 + 原文 PDF tab 按页跳转
+- ☑ #2.6 文献管理页：库 CRUD + 文献上传解析入库 + 文献增删查 + private/org/public 分组 + 复制到个人
+- ☑ #2.7 skill 管理页：列表/新建/编辑/删除 + private/org/public 分组 + 复制到个人
 - ☑ #2.8 设置页：主题/语言/默认检索参数/检索源/账号登出
 - ☑ #2.9 历史对话侧栏：列表/切换/删除/分支切换
 
@@ -68,15 +68,18 @@
 ### M4 · 对话消息树
 - ☑ #4.1 数据模型 conversations / messages（pydantic + psycopg DDL，`pipeline/db/`）
 - ☑ #4.2 启动建表（lifespan `init_db()` 幂等）+ shell 全量备份（`deploy/backup.sh`）替代迁移框架
-- ☐ #4.3 对话 CRUD 路由（POST + APIResponse，含 visibility）
-- ☐ #4.4 消息追加 / 分叉 / 主线推导 / 分支切换（前端已实现同款逻辑，可作参照移植后端）
-- ☐ #4.5 chat/stream 改为落库消息树（替换内存 SessionStore 为主、保留多轮上下文构建）
+- ☑ #4.3 对话 CRUD 路由（列表/读取/visibility，M9.6 统一 POST+APIResponse 待迁移）
+- ☑ #4.4 消息追加 / 主线推导 / copy-on-continue（非 owner 继续对话先复制主线）
+- ☑ #4.5 chat/stream 落库消息树（保留 SessionStore 作为 pipeline 多轮上下文）
 
 ### M5 · 归属与可见性
-- ◐ #5.1 kb_collections / documents / user_skills 模型（已在 `pipeline/db/models.py` 落地）
-- ☐ #5.2 文献库按 owner 物理隔离（命名 + 工作目录）
-- ☐ #5.3 列表/读写鉴权（private ∪ org-public）
-- ☐ #5.4 可见性切换接口（collections / skills / conversations）
+- ☑ #5.1 kb_collections / documents / user_skills 模型扩展到 `private|org|public`
+- ◐ #5.2 文献库按 owner 逻辑隔离（owner + visibility + repo 校验；物理目录仍兼容旧 `uploads/kb_*`，后续可迁 `UPLOAD_DIR/<owner>/`）
+- ☑ #5.3 列表/读写鉴权（private(mine) ∪ org(my_org) ∪ public）
+- ☑ #5.4 可见性切换接口（collections / skills / conversations）
+- ☑ #5.5 对话分享链接（创建/撤销/公开只读解析）+ copy-on-continue 独立副本
+- ☑ #5.6 文献库 / skill copy-to-mine：复制为 owner=me 的独立私有资源
+- ☑ #5.7 chat/query 检索范围校验：collection 必须可读；professional 自定义 skill 按当前用户可读 allowlist 过滤
 
 ### M6 · 生成解耦
 - ☐ #6.1 生成移入后台任务 + 按 message_id 缓冲
@@ -105,6 +108,7 @@
 - ☑ #8.1 `backend/Dockerfile`
 - ☑ #8.2 `frontend/Dockerfile`（多阶段：build → nginx）+ `nginx.conf`
 - ☑ #8.3 `deploy/docker-compose.yaml`（backend + postgres）+ `.env.example`
+- ☑ #8.6 RustFS/S3 compatible 对象存储服务与 env 配置（PDF 原文 + 解析产物 + 预签名 URL）
 - ☑ #8.4 CI：变更检测（paths）+ 构建推送私有仓库镜像（DP_USERNAME/DP_PASSWORD）
 - ☑ #8.5 CI：前端变更构建并部署 GitHub Pages（CNAME rag.hal9k.one）
 
@@ -139,7 +143,8 @@
 - 2026-06-09 · UI 二轮（按反馈逐组件落地）：明确「下滑线 = 按钮文字下划线」并全局兜底 `a,button{text-decoration:none}`（正文链接 hover 下划线保留）；问答控制行/文献库下拉由描边方块改 Vercel 式幽灵工具按钮 `tbtn`/`tbtn-on`；助手回答去盒子（直接渲染于背景），来源/引用条目、技能提示、编辑框去边框盒子改浅填充；横向分割线降为 `border-softer`（极细），仅保留窗框级分割；整体留白取「适中」（chat/library/skills 头部与内容内边距上调、消息间距加大）。typecheck/build/lint 全绿。
 - 2026-06-09 · UI 风格固化与优化：新增根目录 `UI_STYLE.md`（Vercel 风格源真相）。按钮去 border/shadow（主=纯色主题色 `btn-primary`，次=主题色透明填充 `btn-secondary`，`btn-outline` 已淘汰）；`chip` 去边框；新增 `--accent-soft/-hover`（随主题色派生）与 `bg-accent-soft*`、`shadow-pop`；滚动条改细 + `scrollbar-gutter: stable`（不抖动）；大圆角降到 8px、移除浮层 `shadow-lg`；分段控件改填充轨道；SettingsPage 由多卡片改为单面板 + 分割线。typecheck/build/lint 全绿。
 - 2026-06-09 · 修复登录死循环（M1 #1.4）：`App.vue` 原先用 `@logto/vue` 的 `isLoading` 作为渲染门控；而 `isLoading` 在每次 `getAccessToken/fetchUserInfo` 时都会翻 true，导致 AppLayout 挂载→触发请求→isLoading=true→卸载→resolve 后重新挂载→再请求…的死循环，持续打后端。改为用 `isLoading` 锁存「首次鉴权完成」一次（`initialAuthChecked`），之后仅按 `isAuthenticated` 门控，AppLayout 不再被反复挂载/卸载。
-- 下一步：M9.6 现有端点统一迁移到 POST+APIResponse（含前端 client 与协议文档）→ M4 对话 CRUD/分叉路由落库 → M5 归属与可见性鉴权 → M6 生成解耦 → M7 多源融合。
+- 2026-06-09 · 引用跳转 + 对象存储 + 三级权限：新增 RustFS/S3 client（`boto3`）与 compose 服务/env；上传入库将 PDF 与解析产物写入对象存储并落 `documents.pdf_object_key/artifact_prefix`；新增 `POST /documents/pdf-url` 预签名 URL。前端引入 `@embedpdf/vue-pdf-viewer`，SourcesPanel 增「原文」tab，点击引用角标按 `hit.page_start` 跳页。完成 `Visibility=private|org|public`、`api/authz.py`、`db/repo.py`、collections/skills/conversations/chat/query 权限接线；新增分享链接、copy-on-continue、文献库/skill copy-to-mine 与前端 public→org→mine 分组。验证：frontend typecheck 通过；后端变更文件 `py_compile` 通过（全量 ruff 仍有历史 typing/ruff 债务，见 #9.7）。
+- 下一步：M9.6 现有端点统一迁移到 POST+APIResponse（含前端 client 与协议文档）→ M6 生成解耦（断连不停/重连续读/停止）→ M7 多源融合。
 
 ---
 
@@ -148,4 +153,5 @@
 - 组织（org）信息如何随 Logto token 下发：需确认 access_token 是否含 `organizations` / `organization_id` claim；否则 org-public 需通过 Logto Management API 或固定单组织实现。【M5 风险】
 - `funmg.dp.tech/sci-loop-api` 反代是否会重写路径前缀（影响前端 `VITE_API_BASE` 与后端 root_path）。【M8】
 - Milvus 多用户隔离：当前按集合命名 + owner 校验；如需更强隔离可评估 partition/db。【M5】
+- 文献库 copy-to-mine 当前会复制 DB metadata、本地解析产物并提交重建任务；对象存储中的 PDF key 会复用源 key。若后续实现源对象硬删除，需要补对象存储前缀级复制或引用计数。【M5】
 - 生成缓冲当前用进程内内存；多副本部署需换 Redis/PG LISTEN。【M6 风险】

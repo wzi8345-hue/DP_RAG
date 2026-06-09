@@ -1,7 +1,7 @@
 """数据库数据结构（pydantic）。
 
 用 pydantic 定义实体（而非 ORM）：psycopg 取回 dict 行后 model_validate 即可，
-入库时 model_dump 取字段。可见性 visibility: private(仅 owner) | org(组织内可读)。
+入库时 model_dump 取字段。可见性 visibility: private(仅 owner) | org(组织内可读) | public(平台可读)。
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-Visibility = Literal["private", "org"]
+Visibility = Literal["private", "org", "public"]
 Role = Literal["user", "assistant"]
 MessageStatus = Literal["pending", "streaming", "done", "failed", "stopped"]
 
@@ -26,6 +26,8 @@ class Conversation(BaseModel):
     active_leaf_message_id: str | None = None
     # pipeline 多轮上下文 / 日志会话标识
     session_id: str | None = None
+    # copy-on-continue / share continue 的来源，仅作审计展示，不参与鉴权
+    forked_from: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -67,6 +69,9 @@ class Document(BaseModel):
     title: str | None = None
     filename: str | None = None
     year: int | None = None
+    pdf_object_key: str | None = None
+    artifact_prefix: str | None = None
+    source_document_id: str | None = None
     status: Literal["parsing", "ready", "failed"] = "parsing"
     task_id: str | None = None
     chunk_count: int = 0
@@ -81,5 +86,15 @@ class UserSkill(BaseModel):
     visibility: Visibility = "private"
     name: str = ""
     description: str | None = None
+    source_owner_id: str | None = None
+    source_skill_id: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class ConversationShare(BaseModel):
+    token: str
+    conversation_id: str
+    owner_id: str
+    created_at: datetime | None = None
+    revoked_at: datetime | None = None

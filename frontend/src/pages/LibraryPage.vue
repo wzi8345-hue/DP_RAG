@@ -23,6 +23,24 @@ const uploadProgress = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const selectedInfo = computed(() => collections.value.find((c) => c.name === selected.value) || null)
+const canWriteSelected = computed(() => selectedInfo.value?.mine !== false)
+const groupedCollections = computed(() => [
+  {
+    key: 'public',
+    label: t('library.publicGroup'),
+    items: collections.value.filter((c) => c.visibility === 'public' && !c.mine),
+  },
+  {
+    key: 'org',
+    label: t('library.orgGroup'),
+    items: collections.value.filter((c) => c.visibility === 'org' && !c.mine),
+  },
+  {
+    key: 'mine',
+    label: t('library.mineGroup'),
+    items: collections.value.filter((c) => c.mine || c.visibility === 'private'),
+  },
+])
 
 async function loadCollections() {
   loading.value = true
@@ -79,13 +97,29 @@ async function rebuild(name: string) {
 }
 
 async function toggleVisibility(c: CollectionInfo) {
-  const next = c.visibility === 'org' ? 'private' : 'org'
+  const next = c.visibility === 'private' ? 'org' : c.visibility === 'org' ? 'public' : 'private'
   try {
     await api.setCollectionVisibility(c.name, next)
     await loadCollections()
   } catch {
     alert('后端暂未支持可见性设置（待 M5）')
   }
+}
+
+async function copyToMine(c: CollectionInfo) {
+  try {
+    const copied = await api.copyCollectionToMine(c.name)
+    await loadCollections()
+    selected.value = copied.id
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
+function visibilityLabel(v?: string): string {
+  if (v === 'public') return t('common.public')
+  if (v === 'org') return t('common.org')
+  return t('common.private')
 }
 
 async function pollTask(task: TaskResponse, label: string): Promise<void> {
@@ -212,38 +246,57 @@ const docColumns = computed<DataTableColumns<DocumentInfo>>(() => [
         <p v-else-if="collections.length === 0" class="px-2 py-6 text-center text-xs text-faint">
           {{ t('library.emptyCollections') }}
         </p>
-        <div
-          v-for="c in collections"
-          :key="c.name"
-          class="group mb-0.5 flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-2 transition-colors"
-          :class="selected === c.name ? 'bg-active hover:bg-active-hover' : 'hover:bg-hover'"
-          @click="selected = c.name"
-        >
-          <span class="i-lucide-folder shrink-0 text-muted" />
-          <div class="min-w-0 flex-1">
-            <div class="truncate text-sm text-base" :title="c.display_name || c.name">
-              {{ c.display_name || c.name.replace(/^kb_/, '') }}
-            </div>
-            <div class="flex items-center gap-1.5 text-[10px] text-faint">
-              <span>{{ t('library.docCount', { n: c.doc_count ?? 0 }) }}</span>
-              <span>·</span>
-              <span>{{ t('library.rowCount', { n: c.row_count }) }}</span>
-              <span v-if="c.visibility === 'org'" class="chip !px-1 !py-0 text-accent">{{ t('common.org') }}</span>
-            </div>
+        <template v-for="group in groupedCollections" :key="group.key">
+          <div v-if="group.items.length" class="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-faint">
+            {{ group.label }}
           </div>
-          <NButton
-            class="shrink-0 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
-            quaternary
-            circle
-            size="tiny"
-            :title="t('common.delete')"
-            @click.stop="removeCollection(c.name)"
+          <div
+            v-for="c in group.items"
+            :key="c.name"
+            class="group mb-0.5 flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-2 transition-colors"
+            :class="selected === c.name ? 'bg-active hover:bg-active-hover' : 'hover:bg-hover'"
+            @click="selected = c.name"
           >
-            <template #icon>
-              <span class="i-lucide-trash-2 text-xs text-red-500" />
-            </template>
-          </NButton>
-        </div>
+            <span class="i-lucide-folder shrink-0 text-muted" />
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-sm text-base" :title="c.display_name || c.name">
+                {{ c.display_name || c.name.replace(/^kb_/, '') }}
+              </div>
+              <div class="flex items-center gap-1.5 text-[10px] text-faint">
+                <span>{{ t('library.docCount', { n: c.doc_count ?? 0 }) }}</span>
+                <span>·</span>
+                <span>{{ t('library.rowCount', { n: c.row_count }) }}</span>
+                <span class="chip !px-1 !py-0 text-accent">{{ visibilityLabel(c.visibility) }}</span>
+              </div>
+            </div>
+            <NButton
+              v-if="!c.mine"
+              class="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+              quaternary
+              circle
+              size="tiny"
+              :title="t('common.copyToMine')"
+              @click.stop="copyToMine(c)"
+            >
+              <template #icon>
+                <span class="i-lucide-copy-plus text-xs" />
+              </template>
+            </NButton>
+            <NButton
+              v-else
+              class="shrink-0 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+              quaternary
+              circle
+              size="tiny"
+              :title="t('common.delete')"
+              @click.stop="removeCollection(c.name)"
+            >
+              <template #icon>
+                <span class="i-lucide-trash-2 text-xs text-red-500" />
+              </template>
+            </NButton>
+          </div>
+        </template>
       </div>
     </div>
     </template>
@@ -259,7 +312,7 @@ const docColumns = computed<DataTableColumns<DocumentInfo>>(() => [
           <div v-if="uploadProgress" class="text-xs text-accent">{{ uploadProgress }}</div>
         </div>
         <div v-if="selected" class="flex items-center gap-2">
-          <NButton tertiary size="small" :title="t('library.rebuild')" @click="rebuild(selected)">
+          <NButton v-if="canWriteSelected" tertiary size="small" :title="t('library.rebuild')" @click="rebuild(selected)">
             <template #icon>
               <span class="i-lucide-hammer" />
             </template>
@@ -267,6 +320,7 @@ const docColumns = computed<DataTableColumns<DocumentInfo>>(() => [
           </NButton>
           <NButton
             v-if="selectedInfo"
+            :disabled="!canWriteSelected"
             tertiary
             size="small"
             @click="toggleVisibility(selectedInfo)"
@@ -274,9 +328,9 @@ const docColumns = computed<DataTableColumns<DocumentInfo>>(() => [
             <template #icon>
               <span :class="selectedInfo.visibility === 'org' ? 'i-lucide-lock' : 'i-lucide-users'" />
             </template>
-            {{ selectedInfo.visibility === 'org' ? t('library.makePrivate') : t('library.makePublic') }}
+            {{ visibilityLabel(selectedInfo.visibility) }}
           </NButton>
-          <NButton type="primary" size="small" :loading="uploading" :disabled="uploading" @click="fileInput?.click()">
+          <NButton v-if="canWriteSelected" type="primary" size="small" :loading="uploading" :disabled="uploading" @click="fileInput?.click()">
             <template #icon>
               <span class="i-lucide-upload" />
             </template>

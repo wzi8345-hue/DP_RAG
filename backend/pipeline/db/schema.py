@@ -18,12 +18,15 @@ SCHEMA_STATEMENTS: list[str] = [
         title                  text NOT NULL DEFAULT '',
         active_leaf_message_id text,
         session_id             text,
+        forked_from            text,
         created_at             timestamptz NOT NULL DEFAULT now(),
         updated_at             timestamptz NOT NULL DEFAULT now()
     )
     """,
+    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS forked_from text",
     "CREATE INDEX IF NOT EXISTS idx_conversations_owner ON conversations(owner_id)",
     "CREATE INDEX IF NOT EXISTS idx_conversations_org ON conversations(org_id)",
+    "CREATE INDEX IF NOT EXISTS idx_conversations_visibility ON conversations(visibility)",
     # ── 消息（树节点；parent_id 自引用，分叉点多子） ────────
     """
     CREATE TABLE IF NOT EXISTS messages (
@@ -68,6 +71,9 @@ SCHEMA_STATEMENTS: list[str] = [
         title           text,
         filename        text,
         year            integer,
+        pdf_object_key  text,
+        artifact_prefix text,
+        source_document_id text,
         status          text NOT NULL DEFAULT 'parsing',
         task_id         text,
         chunk_count     integer NOT NULL DEFAULT 0,
@@ -75,6 +81,10 @@ SCHEMA_STATEMENTS: list[str] = [
         updated_at      timestamptz NOT NULL DEFAULT now()
     )
     """,
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS pdf_object_key text",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS artifact_prefix text",
+    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_document_id text",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_collection_doc_id ON documents(collection_name, doc_id)",
     "CREATE INDEX IF NOT EXISTS idx_documents_coll ON documents(collection_name)",
     "CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_id)",
     # ── 自定义 skill 归属与可见性 ───────────────────────────
@@ -86,9 +96,27 @@ SCHEMA_STATEMENTS: list[str] = [
         visibility  text NOT NULL DEFAULT 'private',
         name        text NOT NULL DEFAULT '',
         description text,
+        source_owner_id text,
+        source_skill_id text,
         created_at  timestamptz NOT NULL DEFAULT now(),
         updated_at  timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY (owner_id, id)
     )
     """,
+    "ALTER TABLE user_skills ADD COLUMN IF NOT EXISTS source_owner_id text",
+    "ALTER TABLE user_skills ADD COLUMN IF NOT EXISTS source_skill_id text",
+    "CREATE INDEX IF NOT EXISTS idx_user_skills_visibility ON user_skills(visibility)",
+    "CREATE INDEX IF NOT EXISTS idx_user_skills_org ON user_skills(org_id)",
+    # ── 对话分享链接（不透明 token；撤销后 token 失效） ─────────
+    """
+    CREATE TABLE IF NOT EXISTS conversation_shares (
+        token           text PRIMARY KEY,
+        conversation_id text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        owner_id        text NOT NULL,
+        created_at      timestamptz NOT NULL DEFAULT now(),
+        revoked_at      timestamptz
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_conversation_shares_conv ON conversation_shares(conversation_id)",
+    "CREATE INDEX IF NOT EXISTS idx_conversation_shares_owner ON conversation_shares(owner_id)",
 ]

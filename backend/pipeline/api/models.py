@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Generic, List, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Literal, Optional, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 T = TypeVar("T")
+Visibility = Literal["private", "org", "public"]
 
 
 class APIResponse(BaseModel, Generic[T]):
@@ -73,6 +74,10 @@ class ChatRequest(BaseModel):
     stream: bool = False
     professional: bool = False  # 专业研究模式: 多轮递进式文献检索 + 综述综合
     collection: Optional[str] = None  # 目标 Milvus 集合 (None = 使用配置默认)
+    conversation_id: Optional[str] = None
+    parent_message_id: Optional[str] = None
+    client_user_message_id: Optional[str] = None
+    client_assistant_message_id: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -177,6 +182,10 @@ class CollectionInfo(BaseModel):
     display_name: str = ""  # 用户可见名 (可含中文); 缺省回退为去前缀的 name
     row_count: int = 0
     doc_count: int = 0  # 本地工作目录中已收纳的文档数 (含尚未灌入的)
+    owner_id: str | None = None
+    org_id: str | None = None
+    visibility: Visibility = "private"
+    mine: bool = False
 
 
 class CollectionsListResponse(BaseModel):
@@ -185,6 +194,11 @@ class CollectionsListResponse(BaseModel):
 
 class CreateCollectionRequest(BaseModel):
     name: str
+    visibility: Visibility = "private"
+
+
+class VisibilityRequest(BaseModel):
+    visibility: Visibility
 
 
 class DeleteCollectionResponse(BaseModel):
@@ -231,6 +245,10 @@ class SkillSummary(BaseModel):
     synthesis_thinking: str = ""
     synthesis_user: str = ""
     editable: bool = False
+    owner_id: str | None = None
+    org_id: str | None = None
+    visibility: Visibility = "private"
+    mine: bool = False
 
 
 class SkillListResponse(BaseModel):
@@ -285,3 +303,48 @@ class LogSessionDetail(BaseModel):
 
 class LogSessionListResponse(BaseModel):
     sessions: List[LogSessionSummary] = []
+
+
+# ---------------------------------------------------------------------------
+# 对象存储 / 分享 / 复制
+# ---------------------------------------------------------------------------
+
+
+class PdfUrlRequest(BaseModel):
+    doc_id: str
+    collection: str | None = None
+    expires_in: int = 900
+
+
+class PdfUrlResponse(BaseModel):
+    url: str
+    doc_id: str
+    collection: str
+    expires_in: int
+
+
+class ConversationShareRequest(BaseModel):
+    conversation_id: str
+
+
+class ConversationShareResponse(BaseModel):
+    token: str
+    url: str
+
+
+class SharedConversationRequest(BaseModel):
+    token: str
+
+
+class ConversationCopyRequest(BaseModel):
+    conversation_id: str | None = None
+    token: str | None = None
+
+
+class ResourceCopyRequest(BaseModel):
+    id: str
+
+
+class ResourceCopyResponse(BaseModel):
+    id: str
+    name: str | None = None

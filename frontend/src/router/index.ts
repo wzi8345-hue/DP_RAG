@@ -28,6 +28,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/pages/CallbackPage.vue'),
     meta: { public: true },
   },
+  {
+    path: '/s/:token',
+    name: 'shared-conversation',
+    component: () => import('@/pages/SharedConversationPage.vue'),
+    meta: { public: true },
+  },
   { path: '/:pathMatch(.*)*', redirect: '/chat' },
 ]
 

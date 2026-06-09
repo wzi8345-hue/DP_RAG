@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -106,13 +106,14 @@ def create_app() -> FastAPI:
     )
 
     # 注册路由
-    from .routers import admin, chat, collections, files, ingest, query, skills
+    from .routers import admin, chat, collections, conversations, files, ingest, query, skills
     app.include_router(query.router, prefix="/api/v1", tags=["查询"])
     app.include_router(chat.router, prefix="/api/v1", tags=["对话"])
     app.include_router(ingest.router, prefix="/api/v1", tags=["灌入"])
     app.include_router(files.router, prefix="/api/v1", tags=["文件"])
     app.include_router(collections.router, prefix="/api/v1", tags=["知识库"])
     app.include_router(skills.router, prefix="/api/v1", tags=["专家技能"])
+    app.include_router(conversations.router, prefix="/api/v1", tags=["对话管理"])
     app.include_router(admin.router, prefix="/api/v1", tags=["运维"])
 
     return app

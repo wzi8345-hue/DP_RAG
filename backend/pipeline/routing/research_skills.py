@@ -473,6 +473,7 @@ def resolve_skills_config(skills_cfg: Optional[Dict[str, Any]]) -> Dict[str, Any
         "router_disable_thinking": bool(router.get("disable_thinking", False)),
         "router_min_confidence": float(router.get("min_confidence", DEFAULT_MIN_CONFIDENCE)),
         "router_strong_min_hits": int(router.get("strong_min_hits", DEFAULT_STRONG_MIN_HITS)),
+        "allowed_ids": list(cfg.get("allowed_ids") or []),
     }
 
 

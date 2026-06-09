@@ -224,6 +224,47 @@ export const useConversationsStore = defineStore('conversations', () => {
     persist()
   }
 
+  function importBackend(payload: Record<string, unknown>): Conversation {
+    const rawMessages = (payload.messages && typeof payload.messages === 'object')
+      ? payload.messages as Record<string, Partial<ChatMessage>>
+      : {}
+    const messages: Record<string, ChatMessage> = {}
+    for (const [id, raw] of Object.entries(rawMessages)) {
+      messages[id] = {
+        id,
+        parentId: typeof raw.parentId === 'string' ? raw.parentId : null,
+        role: raw.role === 'user' ? 'user' : 'assistant',
+        content: typeof raw.content === 'string' ? raw.content : '',
+        hits: raw.hits,
+        context: raw.context,
+        research: raw.research,
+        latency: raw.latency,
+        usage: raw.usage,
+        status: raw.status,
+        error: raw.error,
+        createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
+      }
+    }
+    const id = String(payload.id || rid('c'))
+    const conv: Conversation = {
+      id,
+      title: typeof payload.title === 'string' ? payload.title : '',
+      sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : null,
+      visibility: (payload.visibility === 'org' || payload.visibility === 'public') ? payload.visibility : 'private',
+      messages,
+      rootIds: Array.isArray(payload.rootIds) ? payload.rootIds.map(String) : Object.values(messages).filter((m) => m.parentId === null).map((m) => m.id),
+      activeLeafId: typeof payload.activeLeafId === 'string' ? payload.activeLeafId : null,
+      updatedAt: typeof payload.updatedAt === 'number' ? payload.updatedAt : Date.now(),
+      ownerId: typeof payload.ownerId === 'string' ? payload.ownerId : null,
+      mine: payload.mine === true,
+      forkedFrom: typeof payload.forkedFrom === 'string' ? payload.forkedFrom : null,
+    }
+    conversations.value[id] = conv
+    activeId.value = id
+    persist()
+    return conv
+  }
+
   return {
     conversations,
     activeId,
@@ -242,5 +283,6 @@ export const useConversationsStore = defineStore('conversations', () => {
     branchInfo,
     switchBranch,
     setVisibility,
+    importBackend,
   }
 })
