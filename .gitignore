@@ -1,11 +1,18 @@
 # ── 密钥 / 凭证 (绝不上传) ────────────────────────────────
 pipeline/key
 pipeline/key.pub
+backend/pipeline/key
+backend/pipeline/key.pub
 *.pem
 *_rsa
 *_ed25519
 .env
 .env.*
+deploy/.env
+deploy/local_api_config.yaml
+deploy/backups/
+# 但保留示例文件（供参考，不含真实密钥）
+!.env.example
 
 # ── 大体积原始数据 / 解析中间产物 ─────────────────────────
 cnki/

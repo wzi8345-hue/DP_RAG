@@ -1,0 +1,31 @@
+# 本机联调配置（仅本地开发用，CONFIG_PATH=local_api_config.yaml）：
+# 通过 SSH 端口转发，所有服务在 localhost 上可达。
+#   LLM       -> localhost:8000  (/models/Qwen3.5-9B)
+#   reranker  -> localhost:8001  (/models/Qwen3-Reranker-4B)
+#   embedding -> localhost:8002  (/models/Qwen3-Embedding-4B, dim 2560)
+#   Milvus    -> localhost:19530 (server 模式)
+# 这些与 default_config.yaml 默认一致，这里显式声明便于复现。
+#
+# ⚠️ 容器/镜像部署不依赖本文件：用环境变量覆盖基建连接
+#   (EMBEDDING_API_BASE / MILVUS_URI / LLM_API_BASE / RERANKER_API_BASE …)，
+#   见 deploy/.env.example 与 ARCHITECTURE.md §10。
+
+embedding:
+  api_base: "http://localhost:8002/v1"
+
+milvus:
+  backend: "server"
+  server:
+    uri: "http://localhost:19530"
+    token: ""
+    db_name: ""
+
+retrieval:
+  langgraph:
+    reflection:
+      api_base: "http://localhost:8000/v1"
+    reranker:
+      api_base: "http://localhost:8001/v1"
+
+generation:
+  api_base: "http://localhost:8000/v1"

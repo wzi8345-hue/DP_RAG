@@ -1,0 +1,67 @@
+[project]
+name = "dp-rag-backend"
+version = "2.0.0"
+description = "DP-RAG 后端：FastAPI + RAG pipeline + 多用户（Logto）+ Postgres"
+requires-python = ">=3.10"
+dependencies = [
+    # 核心
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "requests>=2.28",
+    "httpx>=0.24",
+    # 向量库
+    "pymilvus>=2.4.0",
+    # API
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "python-multipart>=0.0.9",
+    # Agentic RAG（可选能力）
+    "langgraph>=0.0.30",
+    "langchain-core>=0.1.0",
+    # 观测（可选）
+    "prometheus-client>=0.20.0",
+    # 鉴权：本地校验 Logto JWT（ES384 需 cryptography）
+    "pyjwt[crypto]>=2.8.0",
+    # 数据库：psycopg 3（直接用，便于使用 Postgres 高级查询）
+    "psycopg[binary,pool]>=3.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6.0",
+]
+
+[tool.uv]
+# 应用而非库：只管理依赖与虚拟环境，不把本项目当作可安装包构建
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    ".venv",
+    ".venv-api",
+    "ragas_eval",
+    "synthetic_qa_gen",
+    "pipeline/.agents",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "W",   # pycodestyle warnings
+]
+ignore = [
+    "E501",  # 行长由 formatter 处理，不作硬错误
+    "B008",  # FastAPI Depends/Header 默认值是惯用法
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"

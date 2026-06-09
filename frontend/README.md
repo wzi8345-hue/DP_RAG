@@ -1,83 +1,49 @@
 # DP-RAG 前端
 
-基于 `pipeline/api`（FastAPI）的 Web 前端：科研文献智能问答、知识库管理、系统状态监控。
+科学知识问答平台前端。Vue 3 · Vite 8 · pnpm · UnoCSS · vue-i18n · `@logto/vue` · markstream-vue · VueUse · Vitest · Oxlint。
 
-技术栈：Vite + React 18 + TypeScript + Tailwind CSS v4。
-
-## 功能
-
-- **智能问答**：多轮对话、SSE 流式输出、Agentic/检索模式切换、引用来源溯源面板。
-- **知识库**：PDF 上传、向量库重灌/增量追加、PDF 解析、向量文件灌入，异步任务进度轮询。
-- **系统状态**：健康检查（Milvus / LLM / Embedding / Reranker / Reflection）、Milvus 集合统计。
-- **设置**：后端地址、API Key、检索模式、Top-K、流式开关，保存在浏览器本地。
-
-## 对接的后端接口
-
-| 方法 | 路径 |
-|---|---|
-| POST | `/api/v1/query` |
-| POST | `/api/v1/chat` |
-| POST | `/api/v1/chat/stream` (SSE) |
-| POST/DELETE | `/api/v1/sessions[/{id}]` |
-| POST | `/api/v1/files/upload` |
-| POST | `/api/v1/ingest/{rebuild,append,parse,load-vec}` |
-| GET | `/api/v1/tasks/{id}` |
-| GET | `/api/v1/stats`, `/api/v1/health` |
+风格参考 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 与 [`../DEV_PLAN.md`](../DEV_PLAN.md)（源真相文档）。
 
 ## 开发
 
 ```bash
-cd frontend
-npm install
-npm run dev
+pnpm install
+cp .env.example .env.local   # 按需修改；本地留空 VITE_API_BASE 走 dev proxy
+pnpm dev                     # http://localhost:9527 （与 Logto 重定向 URI 一致）
 ```
 
-默认 `http://localhost:5173`。开发服务器把 `/api` 代理到后端（默认 `http://localhost:8080`）。
-后端在别处时：
+后端默认代理到 `http://localhost:8080`，可用 `VITE_API_TARGET` 覆盖。
 
-```bash
-VITE_API_TARGET=http://192.168.1.10:8080 npm run dev
+## 脚本
+
+| 命令 | 说明 |
+|------|------|
+| `pnpm dev` | 开发服务器（端口 9527） |
+| `pnpm build` | 类型检查 + 生产构建（产出 `dist/`，含 `404.html` SPA 回退与 `CNAME`） |
+| `pnpm preview` | 预览构建产物 |
+| `pnpm test` | Vitest 单测 |
+| `pnpm lint` | Oxlint |
+| `pnpm typecheck` | vue-tsc 类型检查 |
+
+## 目录
+
+```
+src/
+├── api/         # 类型、HTTP 客户端、SSE
+├── auth/        # Logto 配置
+├── components/  # 复用组件（消息气泡、来源面板、composer…）
+├── composables/ # useApi / useChat / useTheme / useSettings
+├── i18n/        # zh-CN / en
+├── pages/       # chat / library / skills / settings / callback
+├── stores/      # 对话消息树（pinia）
+├── styles/      # 主题 token
+└── utils/       # 引用解析、LaTeX 兜底
 ```
 
-或在「设置」里直接填写后端 Base URL（留空则走开发代理）。
+## 鉴权
 
-## SSH 隧道（连接远程 GPU / Milvus 服务）
+`@logto/vue` 取 access_token（`getAccessToken(API_RESOURCE)`），所有后端请求与 SSE 都带 `Authorization: Bearer <jwt>`。SSE 用 `fetch + ReadableStream`（不用 EventSource，以便携带 token）。
 
-后端通过 SSH 本地端口转发访问远程服务器上的服务（LLM 8000 / reranker 8001 / embedding 8002 / Milvus 19530 / 3000）。
+## 部署
 
-### 一次性：把 key 密码存入 Keychain（key 带密码时必做）
-
-```bash
-ssh-add --apple-use-keychain ~/.ssh/id_ed25519   # 手动输入一次密码，存入钥匙串
-```
-
-完成后，下面两种方式都能**无人值守自动连接**。
-
-### 方式一：启动前端时自动连接
-
-`npm run dev` 会先执行 `predev` 钩子（`scripts/tunnel.sh`）自动拉起隧道（已连接则跳过）。
-也可单独运行：
-
-```bash
-npm run tunnel
-```
-
-### 方式二：永久后台服务（开机自启 + 断线自动重连，推荐）
-
-基于 macOS launchd + autossh：
-
-```bash
-npm run tunnel:install     # 安装并启动（日志: /tmp/dprag-tunnel.log）
-npm run tunnel:uninstall   # 停止并卸载
-```
-
-> 参数（服务器 IP、端口、转发列表）写在 `scripts/tunnel.sh` 与 `scripts/com.dprag.tunnel.plist`，需要变更时直接编辑。
-
-## 构建
-
-```bash
-npm run build      # 产物输出到 dist/
-npm run preview
-```
-
-生产环境部署时，在设置里填写后端绝对地址，或用反向代理把 `/api` 转发到 FastAPI。
+CI 在 `frontend/**` 变化时构建并部署到 GitHub Pages（域名 `rag.hal9k.one`，见 `public/CNAME`）。`VITE_API_BASE` 在 CI 注入为 `https://funmg.dp.tech/sci-loop-api`。

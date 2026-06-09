@@ -2,5 +2,9 @@ node_modules
 dist
 dist-ssr
 *.local
+.env.local
+.env.*.local
+node_modules/.tmp
+*.tsbuildinfo
 .DS_Store
-.vite
+coverage

@@ -1,149 +1,112 @@
-# DP-RAG
+# DP-RAG · 科学知识问答平台
 
-面向科研文献的端到端 **Agentic RAG** 系统：从 PDF 解析、知识分块、向量化入库，到多路径检索与答案生成，并提供完整的 Web 管理界面。
+面向科研文献的端到端 **Agentic RAG** 系统，支持 **多用户**（Logto 登录鉴权、数据按用户隔离、可选组织内共享），提供文献管理、专家技能管理与可溯源的智能问答。
+
+> 📐 架构与计划是项目的两份**源真相文档**，一切开发首要参考、每步推进同步更新：
+> - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — 前后端架构、数据模型、鉴权、部署
+> - [`DEV_PLAN.md`](./DEV_PLAN.md) — 开发计划、排期与每个任务的完成状态
 
 ```
-                         ┌─────────────── 灌入链路 ───────────────┐
-   PDF ──► 解析(MinerU/UniParser) ──► 知识分块 ──► 向量化 ──► Milvus 存储
-                                                                    │
-                         ┌─────────────── 查询链路 ───────────────┐ │
-   用户问题 ──► 检索 (Hybrid / Agentic / 专家模式) ──► LLM 生成 ──► 答案(可溯源)
+浏览器 ── Logto 登录 ──► rag.hal9k.one (前端, GitHub Pages)
+   │ access_token (JWT, audience = sci-loop-api)
+   └──► funmg.dp.tech/sci-loop-api (后端 FastAPI) ──► Postgres / Milvus / LLM
 ```
-
-系统由三部分组成：**算法流水线（pipeline）**、**后端 API（FastAPI）**、**前端界面（React）**。
 
 ---
 
-## 一、算法部分（`pipeline/`）
+## 仓库结构
 
-科研文献 RAG 的核心流水线，覆盖灌入与查询两条链路。
-
-### 灌入链路（ingest）
-
-`PDF → parse → chunk → embed → store`，每篇文档的中间产物按知识库隔离落盘，便于管理与重建。
-
-- **解析**：支持 MinerU 与 UniParser 两种后端，将 PDF 转为结构化内容块（标题/正文/图表/引用）。
-- **分块**：按标题聚合的知识块构建，自动识别摘要类章节（abstract / summary / introduction）。
-- **向量化**：统一 Embedding 客户端，输出可直接入库的向量化 JSON。
-- **存储**：写入 Milvus 集合，按 `doc_id` 去重，支持全量重建 / 增量追加。
-
-### 查询链路（query）
-
-提供三档检索能力，逐级增强：
-
-| 模式 | 说明 |
-|------|------|
-| **基础检索** | `hybrid`（元数据 + 向量，RRF 融合）/ `vector` / `metadata` |
-| **Agentic RAG** | 基于 LangGraph 的 LLM 路由决策 + 多路径并行检索（summary / progressive / local / metadata）+ 重排 + 反思 |
-| **专家模式** | 多轮递进式文献研究：规划子问题 → 迭代检索累积证据 → 充分性判定 → 综述综合，并由「技能（Skill）」按查询类型定制规划/策略/综述提示词 |
-
-关键检索组件位于 `pipeline/retrieval/`（`langgraph_agent.py`、`research_agent.py`、`retrievers.py`、重排与反思等），技能路由位于 `pipeline/routing/`。
-
-### 目录结构
-
-```
-pipeline/
-├── pipeline.py        # Pipeline 编排器
-├── run.py             # CLI 入口
-├── config.py          # 集中式配置 (默认 + 用户 + 环境变量三层覆盖)
-├── default_config.yaml
-├── clients/           # MinerU / UniParser / Embedding / LLM / Milvus 客户端
-├── processors/        # 分块 (chunker) 与向量化 (vectorizer)
-├── retrieval/         # 检索系统 (基础 / Agentic / 专家研究 / 重排 / 反思)
-├── routing/           # 技能路由与研究规划
-├── steps/             # Pipeline 单步 (parse/chunk/embed/store/retrieve/generate)
-├── flows/             # 高级编排 (ingest / query)
-├── skills/            # 内置专家技能定义 (markdown)
-└── api/               # 后端 API (见下)
+```text
+DP_RAG/
+├── ARCHITECTURE.md / DEV_PLAN.md   # 源真相文档
+├── backend/                        # Python 后端（FastAPI + RAG pipeline）
+│   ├── pipeline/
+│   │   ├── api/                    # FastAPI 路由 / 会话 / 任务 / 日志
+│   │   ├── auth/                   # Logto JWT 本地校验 + 用户上下文
+│   │   ├── db/                     # psycopg 3 + pydantic（对话消息树 / 归属 / 可见性，无 ORM）
+│   │   ├── retrieval_sources/      # 多检索源抽象（literature / enterprise_sql 预留）
+│   │   ├── clients/ processors/ retrieval/ routing/ steps/ flows/  # RAG 流水线
+│   │   └── skills/                 # 内置专家技能
+│   ├── pyproject.toml  uv.lock  Dockerfile  run_api.py  local_api_config.yaml
+│   ├── ragas_eval/  synthetic_qa_gen/
+├── frontend/                       # Vue 3 前端（Vite 8 / pnpm / UnoCSS …）
+└── deploy/                         # docker-compose.yaml + .env.example
 ```
 
-### 命令行用法
+---
+
+## 快速开始
+
+### 后端
 
 ```bash
-# 灌入单个 PDF / 批量目录
-python -m pipeline ingest 论文.pdf
-python -m pipeline ingest-dir ./pdf/
+cd backend
+uv sync                       # 依赖与虚拟环境（读取 pyproject.toml / uv.lock）
 
-# 查询 (默认 Agentic RAG)
-python -m pipeline query --query "MoS2 的晶格常数是多少?"
-python -m pipeline query --query "..." --simple --mode vector --top-k 10 --stream
+# 本地联调可跳过鉴权（仅本地！）；DATABASE_URL 未配置时跳过建表
+AUTH_DISABLED=1 CONFIG_PATH=local_api_config.yaml uv run python run_api.py   # :8080
 ```
 
----
+> 依赖与 lint 用 **uv + ruff**：`uv sync`（装依赖）、`uv run ruff check .`（lint）、`uv run ruff format .`（格式化）。数据库直接用 **psycopg 3**，表结构在服务启动（lifespan）自动检查/初始化；备份/恢复见 `deploy/backup.sh` / `deploy/restore.sh`。
 
-## 二、后端部分（`pipeline/api/`）
+鉴权（生产）：后端用 JWKS 本地校验 Logto JWT（issuer `auth.dplink.cc/oidc`，audience `funmg.dp.tech/sci-loop-api`，scope `all:data`）。配置见环境变量（`LOGTO_*`、`DATABASE_URL`、`CORS_ORIGINS`、`API_ROOT_PATH`），详见 [`deploy/.env.example`](./deploy/.env.example)。
 
-基于 **FastAPI** 的 HTTP 服务，所有接口挂载在 `/api/v1` 前缀下，流式接口使用 SSE。
-
-### 主要能力
-
-- **查询 / 对话**：`POST /query`（单次）、`POST /chat`（多轮）、`POST /chat/stream`（SSE 流式，支持专家模式思考过程实时推送）。
-- **知识库管理**：列表 / 新建 / 删除 / 重建（`/collections`），每个知识库对应一个 Milvus 集合 + 本地工作目录，删除连带清理、重建复用解析产物。支持中文库名（自动生成 ASCII slug）。
-- **灌入**：上传 PDF 自动灌入（`/ingest/upload`）、全量重灌 / 增量追加 / 仅解析 / 灌入向量化文件，均为异步任务，经 `/tasks/{id}` 轮询进度。
-- **专家技能**：列表 / 模版 / 新建编辑 / 删除（`/skills`），用户自定义技能即时生效。
-- **运维与日志**：健康检查（`/health`）、集合统计（`/stats`）、文献简介（`/doc_summary`），以及按 session 收集的检索流程日志（`/logs/sessions`，含 SSE 实时流）。
-
-### 认证
-
-Bearer Token 认证，由环境变量 `API_KEYS` 控制；未配置时免认证（本地联调默认）。
-
-> 完整接口规格见 [`docs/后端协议文档.md`](docs/后端协议文档.md)。
-
-### 启动
-
-```bash
-# 方式一: 启动器 (自动设置 INFO 日志级别)
-CONFIG_PATH=local_api_config.yaml .venv-api/bin/python run_api.py
-
-# 方式二: uvicorn 直接启动
-CONFIG_PATH=local_api_config.yaml CORS_ORIGINS="*" \
-  .venv-api/bin/python -m uvicorn pipeline.api.app:app --host 0.0.0.0 --port 8080
-```
-
----
-
-## 三、前端部分（`frontend/`）
-
-基于 **React + TypeScript + Vite + TailwindCSS** 的单页管理界面。
-
-### 功能模块
-
-- **智能问答**：快速检索 / 专家模式切换，流式渲染回答与「思考过程」，引用角标可溯源到文献片段，历史对话本地留存。
-- **知识库管理**：知识库列表、新建、上传 PDF 灌入、删除、重建，实时任务进度。
-- **专家技能**：可视化维护自定义研究技能。
-- **系统状态**：各依赖服务（Milvus / LLM / Embedding / Reranker）健康状态。
-- **检索日志**：按会话查看检索流程日志，支持实时流式追踪。
-
-开发期通过 Vite 代理 `/api` 到后端（默认 `http://localhost:8080`）。
-
-### 启动
+### 前端
 
 ```bash
 cd frontend
-npm install
-npm run dev      # 默认 http://localhost:5173
+pnpm install
+pnpm dev          # http://localhost:9527 （与 Logto 重定向 URI 一致）
+```
+
+本地默认把 `/api` 代理到 `http://localhost:8080`。详见 [`frontend/README.md`](./frontend/README.md)。
+
+### 部署（docker-compose）
+
+```bash
+cd deploy
+cp .env.example .env      # 编辑 Logto / DATABASE_URL / Milvus 配置
+docker compose --env-file .env up -d
 ```
 
 ---
 
-## 配置
+## 核心能力
 
-核心配置见 `pipeline/default_config.yaml`，支持三层覆盖：默认配置 → 用户配置（`--config`）→ 环境变量引用（`${ENV_VAR}`）。
+### RAG 流水线（`backend/pipeline/`）
 
-| 配置节 | 关键字段 | 说明 |
-|--------|---------|------|
-| `parsing` / `mineru` / `uniparser` | `backend`, `authorization`, `api_key` | PDF 解析后端与凭证 |
-| `embedding` | `api_base`, `api_key` | Embedding 服务 |
-| `milvus` | `uri`, `collection`, `dim` | 向量库连接 |
-| `generation` | `api_base`, `api_key`, `model` | 生成 LLM |
-| `retrieval.langgraph` | `reranker`, `reflection`, `professional` | Agentic / 专家模式相关 |
+- **灌入**：`PDF → parse(MinerU/UniParser) → chunk → embed → store(Milvus)`，按知识库隔离落盘，支持重建 / 增量追加。
+- **查询**：三档检索逐级增强——基础 `hybrid/vector/metadata`、**Agentic RAG**（LangGraph 路由 + 多路径检索 + 重排 + 反思）、**专家模式**（多轮递进研究 + 综述综合 + 技能定制）。
 
-> ⚠️ 请勿将真实 API Key 提交到仓库，建议通过环境变量注入。
+### 多用户与鉴权
+
+- Logto OIDC 登录；后端本地校验 JWT；文献库 / 对话 / skill **按用户隔离**，owner 可设为「组织内部可读」共享（`visibility = private | org`）。
+
+### 对话消息树
+
+- 对话以 **消息树** 记录多轮：每条 message 记录 `parent_id`；编辑历史输入重新生成 → 从该处**分叉**；`active_leaf_message_id` 沿父指针回溯并反转 = 当前主线。前端已实现该模型，后端 Postgres 落库逐步接管。
+
+### 前端（`frontend/`）
+
+Vue 3 · `<script setup>` · TS · Vite 8 · pnpm · UnoCSS（presetIcons）· vue-i18n · `@logto/vue` · markstream-vue · VueUse · Vitest · Oxlint。风格类 Vercel 控制台（轻量、平铺、低视觉噪音，light/dark/system + 自定义主题色）。
+
+页面：智能问答（停止 / 编辑重生成分叉 / 断连后台续跑 / 引用查看）、文献管理（库与文献增删改查、上传解析、可见性）、专家技能管理、设置。
 
 ---
 
-## 主要技术栈
+## CI/CD
 
-- **算法/后端**：Python、FastAPI、LangGraph、Milvus、Pydantic
-- **前端**：React 18、TypeScript、Vite、TailwindCSS
-- **解析/模型**：MinerU、UniParser、Embedding / Reranker / LLM（OpenAI 兼容接口）
+GitHub Actions（`.github/workflows/`）：
+
+- `backend/**` 变化 → 构建并推送后端镜像到私有仓库；`frontend/**` 变化 → 构建前端镜像 + 部署 GitHub Pages（`rag.hal9k.one`）。
+- 镜像命名：`dp-harbor-registry.cn-zhangjiakou.cr.aliyuncs.com/dplc/qsar:sci-loop_{backend|frontend}_{yymmdd}_{sha4}`。
+- 私有仓库登录用仓库 secrets `DP_USERNAME` / `DP_PASSWORD`。
+
+---
+
+## 文档
+
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md)、[`DEV_PLAN.md`](./DEV_PLAN.md)
+- [`docs/后端协议文档.md`](docs/后端协议文档.md)、[`docs/功能描述文档.md`](docs/功能描述文档.md)
+
+> ⚠️ 请勿将真实 API Key / 密码提交到仓库，统一通过环境变量 / secrets 注入。

@@ -2,11 +2,14 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DP-RAG · 科研文献智能问答</title>
+    <!-- Naive UI 样式注入锚点：保证与 UnoCSS 的注入顺序确定 -->
+    <meta name="naive-ui-style" />
+    <title>DP-RAG · 科学知识问答</title>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
