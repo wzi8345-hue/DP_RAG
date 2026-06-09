@@ -8,6 +8,10 @@
 embedding:
   api_base: "http://localhost:8002/v1"
   api_key: "${VLLM_API_KEY}"
+  # 注意: 8002 上的 vLLM 实际注册的 model id 是 /Qwen3-Embedding-4B
+  # (没有 /models 前缀, 与 8000/8001 不同)。用错名字会 404 → embed 步骤失败 →
+  # 不入库 (chunk 仍报 118, 但 row_count=0)。
+  model: "/Qwen3-Embedding-4B"
 
 milvus:
   backend: "server"

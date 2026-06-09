@@ -291,6 +291,7 @@ function TaskRow({ task }: { task: TaskResponse }) {
       {task.error && (
         <div className="mt-1 text-xs text-rose-400">{task.error}</div>
       )}
+      {task.status === "done" && <TaskResultBanner result={task.result} />}
       {task.status === "done" && task.result != null && (
         <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-slate-950/60 p-2 text-xs text-slate-300">
           {JSON.stringify(task.result, null, 2)}
@@ -298,6 +299,41 @@ function TaskRow({ task }: { task: TaskResponse }) {
       )}
     </div>
   );
+}
+
+function TaskResultBanner({ result }: { result: unknown }) {
+  if (!result || typeof result !== "object") return null;
+  const r = result as {
+    failed?: number;
+    success?: number;
+    stored_chunks?: number;
+    failed_reasons?: { doc_id?: string; reason?: string }[];
+  };
+  const failed = r.failed ?? 0;
+  const stored = r.stored_chunks;
+  if (failed > 0) {
+    return (
+      <div className="mt-2 rounded-lg bg-rose-500/15 px-3 py-2 text-xs text-rose-300">
+        <div className="font-medium">
+          {failed} 篇灌入失败
+          {typeof stored === "number" ? `，实际入库 ${stored} 块` : ""}
+        </div>
+        {(r.failed_reasons || []).map((f, i) => (
+          <div key={i} className="mt-0.5 opacity-90">
+            · {f.doc_id || "(未知文档)"}: {f.reason || "未知原因"}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (typeof stored === "number" && (r.success ?? 0) > 0) {
+    return (
+      <div className="mt-2 rounded-lg bg-emerald-500/15 px-3 py-2 text-xs text-emerald-300">
+        成功入库 {stored} 块（{r.success} 篇）
+      </div>
+    );
+  }
+  return null;
 }
 
 function UploadZone({ onFiles }: { onFiles: (f: FileList | null) => void }) {

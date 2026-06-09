@@ -18,6 +18,35 @@ from .tasks import TaskStore
 logger = logging.getLogger(__name__)
 
 
+def _startup_secret_check(pipeline) -> None:
+    """启动自检: 关键密钥为空时打一条醒目的汇总告警。
+
+    背景: 后端若没 `source .env.local` 就启动, ${VAR} 占位符会退化成空串,
+    导致 MinerU 解析 401 (chunk=0)、embedding 401/404 (无法入库) 等"静默失败"。
+    这里在启动时集中提示, 避免上传后才从一堆日志里反推根因。仅告警, 不阻断启动。
+    """
+    try:
+        cfg = pipeline.config
+        backend = (cfg.parsing or {}).get("backend", "mineru")
+        missing: list[str] = []
+        if backend == "mineru" and not (cfg.mineru or {}).get("authorization"):
+            missing.append("MINERU_AUTHORIZATION (PDF 解析将 401 → chunk=0)")
+        if backend == "uniparser" and not (cfg.uniparser or {}).get("api_key"):
+            missing.append("UNIPARSER_API_KEY (PDF 解析将失败)")
+        if not (cfg.embedding or {}).get("api_key"):
+            missing.append("embedding.api_key/VLLM_API_KEY (向量化可能 401 → 无法入库)")
+        if not (cfg.generation or {}).get("api_key"):
+            missing.append("generation.api_key/VLLM_API_KEY (生成/摘要可能 401)")
+        if missing:
+            logger.error(
+                "[startup] 检测到关键密钥为空, 上传/检索很可能静默失败: %s; "
+                "若用本地服务请确认已 `set -a; source .env.local; set +a` 再启动。",
+                "; ".join(missing),
+            )
+    except Exception as e:
+        logger.warning(f"[startup] 密钥自检异常 (忽略): {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """启动时创建 Pipeline 单例, 关闭时清理资源。"""
@@ -35,6 +64,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     config_path = os.environ.get("CONFIG_PATH")
     pipeline = Pipeline(config_path=config_path or None)
+    _startup_secret_check(pipeline)
 
     # 多轮对话保留轮数: 与算法侧 generation.max_history_turns 一致
     gen_cfg = getattr(pipeline, "config", None) and pipeline.config.generation or {}

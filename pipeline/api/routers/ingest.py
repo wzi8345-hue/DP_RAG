@@ -65,20 +65,59 @@ def _ingest_load_vec(task_id: str, path: str, recreate: bool, purge: bool, skip:
     return {"files_loaded": len(results), "total_chunks": total}
 
 
+def _file_ok(r: IngestResult) -> bool:
+    """单篇文档是否全链路成功 (有步骤且每一步都成功)。"""
+    return bool(r.steps) and all(s.success for s in r.steps)
+
+
+def _first_failure(r: IngestResult) -> Optional[str]:
+    """提取一篇文档第一个失败步骤的原因 (供前端直接展示真实错误)。"""
+    for s in r.steps:
+        if not s.success:
+            return f"{s.step}: {s.error or '未知错误'}"
+    if not r.steps:
+        return "未执行任何步骤 (上传保存或解析提交阶段失败)"
+    return None
+
+
+def _step_dicts(r: IngestResult) -> List[Dict[str, Any]]:
+    """把步骤摘要转成 dict, 失败步骤带上 error 原因。"""
+    out: List[Dict[str, Any]] = []
+    for s in r.steps:
+        d: Dict[str, Any] = {"step": s.step, "success": s.success, "elapsed": round(s.elapsed, 2)}
+        if not s.success and s.error:
+            d["error"] = s.error
+        out.append(d)
+    return out
+
+
 def _summarize_ingest(results: List[IngestResult]) -> Dict[str, Any]:
-    success = sum(1 for r in results if r.steps and all(s.success for s in r.steps))
+    ok_flags = [_file_ok(r) for r in results]
+    success = sum(ok_flags)
     failed = len(results) - success
+    # stored_chunks 只统计全链路成功的文档; total_chunks (来自 chunk 步) 失败时仍 > 0,
+    # 但那些块并未入库, 单看它会误以为成功 — 所以两者都返回, 以 stored_chunks 为准。
+    stored_chunks = sum(r.total_chunks for r, ok in zip(results, ok_flags) if ok)
+    total_chunks = sum(r.total_chunks for r in results)
+    failed_reasons = [
+        {"doc_id": r.doc_id, "reason": _first_failure(r)}
+        for r, ok in zip(results, ok_flags) if not ok
+    ]
     return {
         "total": len(results),
         "success": success,
         "failed": failed,
+        "stored_chunks": stored_chunks,
+        "total_chunks": total_chunks,
+        "failed_reasons": failed_reasons,
         "details": [
             {
                 "doc_id": r.doc_id,
+                "ok": ok,
                 "total_chunks": r.total_chunks,
-                "steps": [{"step": s.step, "success": s.success, "elapsed": round(s.elapsed, 2)} for s in r.steps],
+                "steps": _step_dicts(r),
             }
-            for r in results
+            for r, ok in zip(results, ok_flags)
         ],
     }
 
@@ -209,9 +248,22 @@ def _ingest_upload(
     except Exception as e:
         logger.warning(f"[ingest-upload] flush 失败 {collection}: {e}")
 
-    total_chunks = sum(r.total_chunks for r in results)
-    success = sum(1 for r in results if r.steps and all(s.success for s in r.steps))
+    ok_flags = [_file_ok(r) for r in results]
+    success = sum(ok_flags)
     failed = len(results) - success
+    # stored_chunks: 真正入库的块数 (只统计全链路成功的文档)。
+    # total_chunks 仍是 chunk 步产出, 失败时 > 0 但未入库 — 单看它会误判成功。
+    stored_chunks = sum(r.total_chunks for r, ok in zip(results, ok_flags) if ok)
+    total_chunks = sum(r.total_chunks for r in results)
+    failed_reasons = [
+        {"doc_id": r.doc_id, "reason": _first_failure(r)}
+        for r, ok in zip(results, ok_flags) if not ok
+    ]
+    if failed_reasons:
+        logger.warning(
+            f"[ingest-upload] {failed}/{total} 篇灌入失败 (collection={collection}): "
+            f"{failed_reasons}"
+        )
     return {
         "collection": collection,
         "files": total,
@@ -219,17 +271,17 @@ def _ingest_upload(
         "failed": failed,
         "skipped_existing": len(skipped_existing),
         "skipped_files": skipped_existing,
+        "stored_chunks": stored_chunks,
         "total_chunks": total_chunks,
+        "failed_reasons": failed_reasons,
         "details": [
             {
                 "doc_id": r.doc_id,
+                "ok": ok,
                 "total_chunks": r.total_chunks,
-                "steps": [
-                    {"step": s.step, "success": s.success, "elapsed": round(s.elapsed, 2)}
-                    for s in r.steps
-                ],
+                "steps": _step_dicts(r),
             }
-            for r in results
+            for r, ok in zip(results, ok_flags)
         ],
     }
 
