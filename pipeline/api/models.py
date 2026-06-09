@@ -153,8 +153,8 @@ class SessionResponse(BaseModel):
 class CollectionInfo(BaseModel):
     name: str  # Milvus 集合名 (kb_ 前缀, 纯 ASCII)
     display_name: str = ""  # 用户可见名 (可含中文); 缺省回退为去前缀的 name
-    row_count: int = 0
-    doc_count: int = 0  # 本地工作目录中已收纳的文档数 (含尚未灌入的)
+    row_count: int = 0  # Milvus 中实际入库的数据块数 (flush 后真实值)
+    doc_count: int = 0  # Milvus 中实际入库的 distinct doc_id 数 (不含解析/灌入失败的)
 
 
 class CollectionsListResponse(BaseModel):

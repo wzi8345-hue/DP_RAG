@@ -214,11 +214,25 @@ def list_collections(
     for name in _list_disk_kbs(prefix):
         by_name.setdefault(name, {"name": name, "row_count": 0})
 
-    # 4) 补充每个库的本地文档数 + 显示名
+    # 4) 补充每个库的文档数 + 显示名
+    # doc_count 取 Milvus 中实际入库的 distinct doc_id 数 (反映真实入库情况);
+    # 解析/灌入失败的文档虽在磁盘留有目录, 但不会进 Milvus, 故不计入 —— 这样
+    # 列表显示的 "篇文档 · 条数据块" 始终与实际入库数据一致。
+    # (磁盘目录数 _disk_doc_count 仅用于 rebuild 判断本地是否有产物可重灌。)
     collections = []
     for name, info in sorted(by_name.items()):
         kb_dir = kb_workspace_dir(name)
-        info["doc_count"] = _disk_doc_count(kb_dir)
+        row_count = info.get("row_count", 0)
+        if row_count > 0:
+            try:
+                info["doc_count"] = len(pipe.list_doc_ids(name))
+            except Exception as e:
+                logger.warning(
+                    f"[collections] 查询 {name} 实际 doc 数失败, 回退磁盘目录数: {e}"
+                )
+                info["doc_count"] = _disk_doc_count(kb_dir)
+        else:
+            info["doc_count"] = 0
         if name == default_coll:
             info["display_name"] = "默认知识库"
         else:
