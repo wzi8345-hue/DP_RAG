@@ -1,0 +1,134 @@
+# DP-RAG 容器服务一键编排
+# 忠实复刻 docs/容器部署文档.md 中的 5 条 docker run 命令。
+#
+# 用法（在含三个模型目录的工作目录下）:
+#   docker compose -f docker-compose.yml up -d
+#   docker compose -f docker-compose.yml ps
+#   docker compose -f docker-compose.yml logs -f vllm-llm
+#   docker compose -f docker-compose.yml down        # 停止并删除容器(保留数据卷)
+#
+# 模型目录(与各服务的 volumes 相对路径一致, 须放在本文件同级目录):
+#   ./Qwen3-Embedding-4B  ./Qwen3-Reranker-4B  ./Qwen3.5-9B
+
+x-vllm-logging: &vllm-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
+x-gpus-all: &gpus-all
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: all
+          capabilities: [gpu]
+
+services:
+  # ── Milvus 向量库 (单机版, 内嵌 etcd) ──────────────────────────
+  milvus-standalone:
+    image: milvusdb/milvus:v2.5.4
+    container_name: milvus-standalone
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_USE_EMBED: "true"
+      ETCD_DATA_DIR: "/var/lib/milvus/etcd"
+      COMMON_STORAGETYPE: "local"
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    # 原 docker run 命令未挂卷(数据随容器销毁); 这里加命名卷持久化, 更安全。
+    volumes:
+      - milvus-data:/var/lib/milvus
+    restart: unless-stopped
+
+  # ── Embedding: Qwen3-Embedding-4B (端口 8002) ─────────────────
+  vllm-embed:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-embed
+    ports:
+      - "8002:8002"
+    logging: *vllm-logging
+    volumes:
+      - ./Qwen3-Embedding-4B:/models/Qwen3-Embedding-4B
+    command:
+      - /models/Qwen3-Embedding-4B
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8002"
+      - --trust-remote-code
+      - --gpu-memory-utilization
+      - "0.25"
+      - --max-model-len
+      - "9216"
+    deploy: *gpus-all
+    restart: unless-stopped
+
+  # ── Reranker: Qwen3-Reranker-4B (端口 8001) ───────────────────
+  vllm-rerank:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-rerank
+    ports:
+      - "8001:8001"
+    logging: *vllm-logging
+    volumes:
+      - ./Qwen3-Reranker-4B:/models/Qwen3-Reranker-4B
+    command:
+      - /models/Qwen3-Reranker-4B
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8001"
+      - --trust-remote-code
+      - --gpu-memory-utilization
+      - "0.25"
+      - --max-model-len
+      - "10240"
+      - --hf_overrides
+      - '{"architectures": ["Qwen3ForSequenceClassification"], "classifier_from_token": ["no", "yes"], "is_original_qwen3_reranker": true}'
+    deploy: *gpus-all
+    restart: unless-stopped
+
+  # ── 生成 LLM: Qwen3.5-9B (端口 8000) ──────────────────────────
+  vllm-llm:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-llm
+    ports:
+      - "8000:8000"
+    logging: *vllm-logging
+    volumes:
+      - ./Qwen3.5-9B:/models/Qwen3.5-9B
+    command:
+      - --model
+      - /models/Qwen3.5-9B
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --max-model-len
+      - "30960"
+      - --gpu-memory-utilization
+      - "0.5"
+      - --max-num-seqs
+      - "128"
+      - --reasoning-parser
+      - qwen3
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - hermes
+    deploy: *gpus-all
+    restart: unless-stopped
+
+  # ── Attu: Milvus 可视化 (端口 3000) ───────────────────────────
+  milvus-attu:
+    image: zilliz/attu:v2.5.10
+    container_name: milvus-attu
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  milvus-data:
