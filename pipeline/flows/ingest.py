@@ -356,7 +356,13 @@ class IngestFlow:
             derived_doc_id = os.path.basename(os.path.normpath(output_dir))
         else:
             derived_doc_id = os.path.splitext(os.path.basename(file_paths[0]))[0] if file_paths else None
-        derived_doc_name = os.path.basename(file_paths[0]) if file_paths else derived_doc_id
+        # UniParser: 用解析出的真实标题作 doc_name (检索"来源"显示用); doc_id 仍是
+        # 文件名 stem 作主键. MinerU 维持原行为 (doc_name = PDF 文件名).
+        resolved_title = (chunk_result.get("doc_title") or "").strip()
+        if backend == "uniparser" and resolved_title:
+            derived_doc_name = resolved_title
+        else:
+            derived_doc_name = os.path.basename(file_paths[0]) if file_paths else derived_doc_id
 
         # 4) 存入 Milvus
         t0 = time.time()
@@ -740,7 +746,14 @@ class IngestFlow:
 
         # store
         derived_doc_id = os.path.basename(os.path.normpath(output_dir))
-        derived_doc_name = derived_doc_id
+        # UniParser: 用解析出的真实标题作 doc_name (检索结果"来源"显示用),
+        # doc_id 仍保留文件名 stem 作主键 (保证 append 去重/覆盖语义不变).
+        # MinerU 维持原行为 (doc_name = 文件名 stem).
+        resolved_title = (chunk_result.get("doc_title") or "").strip()
+        if backend == "uniparser" and resolved_title:
+            derived_doc_name = resolved_title
+        else:
+            derived_doc_name = derived_doc_id
         t0 = time.time()
         try:
             store_result = self._store(vec_output_path, doc_id=derived_doc_id, doc_name=derived_doc_name)
@@ -950,10 +963,19 @@ class IngestFlow:
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(blocks, f, ensure_ascii=False, indent=2)
 
-        # 写 sidecar meta (让 MilvusIngester._load_meta_sidecar 拿到 source/year 等元信息);
-        # doc_id / doc_name 在 _store 阶段还会被 output_dir 名覆盖, 这里不强填.
+        # 解析出的真实标题 (title chunk 内容): chunker 已优先用 documenttitle,
+        # 仅当缺失/乱码才回退到 doc_title(文件名). 回传给上层作 doc_name.
+        resolved_title = next(
+            (b.get("content", "").strip() for b in blocks if b.get("type") == "title"),
+            "",
+        )
+
+        # 写 sidecar meta (source/year 等); 同时把真实标题写入 doc_name, 让 CLI
+        # 单步链路 (经 sidecar) 也能拿到真实标题. flow 的 _store 走显式 doc_name.
         try:
-            write_uniparser_meta_sidecar(output_path, result_json)
+            write_uniparser_meta_sidecar(
+                output_path, result_json, doc_name=resolved_title or None,
+            )
         except Exception as e:
             logger.warning(f"[chunk-uniparser] 写 meta sidecar 失败: {e}")
 
@@ -961,12 +983,14 @@ class IngestFlow:
         for b in blocks:
             type_count[b["type"]] = type_count.get(b["type"], 0) + 1
         logger.info(
-            f"[chunk-uniparser] 共生成 {len(blocks)} 个知识块: {type_count}"
+            f"[chunk-uniparser] 共生成 {len(blocks)} 个知识块: {type_count}; "
+            f"doc_title={resolved_title!r}"
         )
         return {
             "output_path": output_path,
             "total_chunks": len(blocks),
             "type_count": type_count,
+            "doc_title": resolved_title,
         }
 
     def _embed(self, input_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
