@@ -44,7 +44,9 @@ class MinerUClient:
         poll_interval: int = 5,
     ) -> None:
         self.api_url = api_url
-        self.authorization = authorization
+        # 防御性清洗: 去掉首尾空白/换行 (常见于从 .env / 配置粘贴带入的 \r\n),
+        # 否则 requests 会因 header 含回车符直接拒绝请求。
+        self.authorization = (authorization or "").strip()
         self.model_version = model_version
         self.output_dir = output_dir
         self.poll_max_retries = poll_max_retries

@@ -305,6 +305,61 @@ def build_schema(
 # Sidecar meta + publication_year 解析
 # ---------------------------------------------------------------------------
 
+def _meta_sidecar_path(vec_path: str, explicit: Optional[str] = None) -> str:
+    """推断 vec.json 对应的 sidecar meta 路径。
+
+    优先级:
+    1. 显式指定的路径
+    2. 同目录下同名 *_meta.json (剥掉 _vec/_vectors/_embedded 后缀)
+    """
+    if explicit:
+        return explicit
+    base = os.path.splitext(vec_path)[0]
+    for suffix in ("_vec", "_vectors", "_embedded"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    return base + "_meta.json"
+
+
+def _write_meta_sidecar(
+    vec_path: str,
+    doc_id: str,
+    doc_name: str,
+    publication_year: int,
+    explicit: Optional[str] = None,
+) -> None:
+    """把本次入库实际使用的 doc_id / doc_name / publication_year 落到 sidecar。
+
+    使 ``(knowledge_blocks_vec.json + knowledge_blocks_meta.json)`` 成为一个
+    自包含、可重放的单元: 之后直接 ``ingest_file(vec.json)`` 即可还原出与首次
+    入库完全一致的 Milvus 行 (pk / doc_id / doc_name / publication_year 一致),
+    且无需重新 embed (向量逐字节复用)。
+
+    采用 merge 写法: 若 sidecar 已存在 (如 UniParser chunker 写过 source/标题等),
+    只更新这三个字段, 不覆盖其它信息。best-effort, 失败仅告警不抛。
+    """
+    path = _meta_sidecar_path(vec_path, explicit)
+    meta: Dict[str, Any] = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                meta = loaded
+        except Exception:
+            meta = {}
+    meta["doc_id"] = doc_id
+    meta["doc_name"] = doc_name
+    meta["publication_year"] = int(publication_year or 0)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+        logger.info(f"  [meta] 写入 sidecar: {path}")
+    except Exception as e:
+        logger.warning(f"  [meta] 写 sidecar 失败 {path}: {e}")
+
+
 def _load_meta_sidecar(vec_path: str, explicit: Optional[str] = None) -> Dict[str, Any]:
     """根据 vec.json 路径推断 sidecar meta 路径并加载。
 
@@ -313,15 +368,7 @@ def _load_meta_sidecar(vec_path: str, explicit: Optional[str] = None) -> Dict[st
     2. 同目录下同名 *_meta.json
     3. 都没有就返回 {}
     """
-    if explicit:
-        path = explicit
-    else:
-        base = os.path.splitext(vec_path)[0]
-        for suffix in ("_vec", "_vectors", "_embedded"):
-            if base.endswith(suffix):
-                base = base[: -len(suffix)]
-                break
-        path = base + "_meta.json"
+    path = _meta_sidecar_path(vec_path, explicit)
     if not path or not os.path.exists(path):
         return {}
     try:
@@ -867,6 +914,13 @@ class MilvusIngester:
             logger.info(f"  [meta] publication_year = {publication_year}")
         else:
             logger.info("  [meta] publication_year 未知 (=0)")
+
+        # 落盘完整 sidecar: 让 (vec.json + meta.json) 成为可重放单元,
+        # 之后无需重新 embed 即可还原出完全一致的 Milvus 行。
+        _write_meta_sidecar(
+            path, doc_id=doc_id, doc_name=doc_name,
+            publication_year=publication_year, explicit=meta_json_path,
+        )
 
         if purge_existing:
             self.purge_doc(doc_id)

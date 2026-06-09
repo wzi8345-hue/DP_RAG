@@ -628,14 +628,20 @@ def build_knowledge_blocks_uniparser(
     seen_image_groups: set = set()
     seen_table_groups: set = set()
 
-    # 注入文献 title chunk (来自 documenttitle 或 doc_title 参数)
+    # 注入文献 title chunk: 优先用 UniParser 解析出的真实标题 (documenttitle),
+    # 仅当其缺失/乱码时才回退到 doc_title 参数 (通常为 PDF 文件名去后缀)。
     documenttitle_text = ""
     for b in all_blocks:
         if b.get("type") == DOC_TITLE_TYPE:
             documenttitle_text = _block_text(b) or documenttitle_text
             if documenttitle_text:
                 break
-    title_text = (doc_title or "").strip() or documenttitle_text
+    documenttitle_text = (documenttitle_text or "").strip()
+    fallback_title = (doc_title or "").strip()
+    if documenttitle_text and not is_garbled_text(documenttitle_text):
+        title_text = documenttitle_text
+    else:
+        title_text = fallback_title
     if title_text and not is_garbled_text(title_text):
         title_chunk = _build_doc_title_chunk(title_text, page=0)
         if title_chunk:

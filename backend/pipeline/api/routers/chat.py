@@ -101,6 +101,11 @@ async def chat_stream(
     pipe = get_pipeline()
     store = get_session_store()
 
+    # 切换目标集合 (collection=None/空 → 回退原始默认库 literature_chunks)。
+    # 必须经 pipeline 统一切换: stream_chat_events 自身无法感知"原始默认库",
+    # 选默认库时前端传 null, 若不在此处回退会沿用上次检索污染的集合。
+    pipe._maybe_switch_collection(req.collection)
+
     session_id = req.session_id
     if session_id:
         session = store.get(session_id)

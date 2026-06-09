@@ -12,6 +12,7 @@
 
 embedding:
   api_base: "http://localhost:8002/v1"
+  api_key: "${VLLM_API_KEY}"
 
 milvus:
   backend: "server"
@@ -26,6 +27,8 @@ retrieval:
       api_base: "http://localhost:8000/v1"
     reranker:
       api_base: "http://localhost:8001/v1"
+      api_key: "${VLLM_API_KEY}"
 
 generation:
   api_base: "http://localhost:8000/v1"
+  api_key: "${VLLM_API_KEY}"

@@ -57,6 +57,7 @@ class RerankerClient:
         self,
         api_base: str = "http://localhost:8001/v1",
         model: str = "Qwen/Qwen3-Reranker-0.6B",
+        api_key: str = "",
         top_k: int = 5,
         score_threshold: float = 0.5,
         timeout: int = 60,
@@ -69,6 +70,7 @@ class RerankerClient:
         Args:
             api_base: rerank 服务地址 (如 http://localhost:8001/v1)
             model: rerank 模型名
+            api_key: vLLM --api-key 对应的 Bearer token (与 LLM/Embedding 共用)
             top_k: 默认保留的 top-k 条数
             score_threshold: 质量门控阈值
             timeout: 请求超时 (秒)
@@ -77,6 +79,7 @@ class RerankerClient:
         """
         self.api_base = api_base.rstrip("/")
         self.model = model
+        self.api_key = (api_key or "").strip()
         self.top_k = top_k
         self.score_threshold = score_threshold
         self.timeout = timeout
@@ -101,12 +104,16 @@ class RerankerClient:
             "top_n": top_n,
         }
 
+        headers: Dict[str, str] = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
         last_err: Optional[Exception] = None
         data: Optional[Dict[str, Any]] = None
         for attempt in range(1, self.max_retries + 1):
             try:
                 with httpx.Client(timeout=self.timeout) as client:
-                    resp = client.post(url, json=payload)
+                    resp = client.post(url, json=payload, headers=headers)
                     resp.raise_for_status()
                     data = resp.json()
                 break
