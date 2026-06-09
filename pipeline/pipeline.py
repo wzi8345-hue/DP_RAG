@@ -506,6 +506,37 @@ class Pipeline:
                 self.config.milvus.pop("collection", None)
             self._ingest_flow = None
 
+    def reingest_directory(
+        self,
+        directory: str,
+        collection: str,
+        recreate: bool = False,
+        skip_existing: bool = True,
+        progress_callback: Optional[Any] = None,
+    ) -> List[IngestResult]:
+        """从已有工作目录复用 ``knowledge_blocks_vec.json`` 直接重灌指定集合。
+
+        与 ``vectorize_directory`` 不同: 不重新 chunk / embed, 而是把已落盘的向量
+        逐字节喂回 Milvus, 因此重灌结果与首次入库一致, 且不依赖 embedding 服务在线。
+        缺 vec.json 的文档自动回退到完整 chunk→embed→store。
+        """
+        original_collection = self.config.milvus.get("collection")
+        self.config.milvus["collection"] = collection
+        self._ingest_flow = None
+        try:
+            return self._get_ingest_flow().reingest_from_directory(
+                directory,
+                recreate=recreate,
+                skip_existing=skip_existing,
+                progress_callback=progress_callback,
+            )
+        finally:
+            if original_collection is not None:
+                self.config.milvus["collection"] = original_collection
+            else:
+                self.config.milvus.pop("collection", None)
+            self._ingest_flow = None
+
     # ── 集合管理 ────────────────────────────────────────────────────
 
     def list_collections(self, prefix: str = "kb_") -> List[Dict[str, Any]]:
@@ -609,6 +640,67 @@ class Pipeline:
                 client.flush(name)
         except Exception as e:
             logger.warning(f"[pipeline] flush 集合失败 {name}: {e}")
+
+    def list_doc_ids(self, collection: str) -> set:
+        """返回某集合中已入库的全部 doc_id (集合不存在时返回空集)。
+
+        用于"同库再次上传按文件名去重": doc_id == PDF 文件名 stem, 据此跳过
+        已入库文献, 只灌未入库的。
+        """
+        from .clients.milvus import resolve_milvus_connection
+        from pymilvus import MilvusClient
+
+        cfg = self.config.milvus
+        uri, token, db_name = resolve_milvus_connection(cfg)
+        kwargs: Dict[str, Any] = {
+            "uri": uri,
+            "keepalive_time_ms": 300_000,
+            "keepalive_timeout_ms": 60_000,
+        }
+        if token:
+            kwargs["token"] = token
+        if db_name:
+            kwargs["db_name"] = db_name
+        client = MilvusClient(**kwargs)
+
+        doc_ids: set = set()
+        if not client.has_collection(collection):
+            return doc_ids
+        # 优先 query_iterator (无 offset+limit 窗口上限); 老版本回退分页 query
+        try:
+            it = client.query_iterator(
+                collection_name=collection, filter="",
+                output_fields=["doc_id"], batch_size=5000,
+            )
+            while True:
+                batch = it.next()
+                if not batch:
+                    break
+                for r in batch:
+                    d = r.get("doc_id", "")
+                    if d:
+                        doc_ids.add(d)
+            if hasattr(it, "close"):
+                it.close()
+        except AttributeError:
+            offset, page = 0, 5000
+            while True:
+                batch = client.query(
+                    collection_name=collection, filter="",
+                    output_fields=["doc_id"], limit=page, offset=offset,
+                )
+                if not batch:
+                    break
+                for r in batch:
+                    d = r.get("doc_id", "")
+                    if d:
+                        doc_ids.add(d)
+                if len(batch) < page:
+                    break
+                offset += page
+        except Exception as e:
+            logger.warning(f"[pipeline] list_doc_ids 查询失败 {collection}: {e}")
+        return doc_ids
 
     # ── 便利方法 ──────────────────────────────────────────────────────
 

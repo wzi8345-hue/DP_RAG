@@ -104,7 +104,7 @@ chunking:
 embedding:
   api_base: "http://vllm-emb:8000/v1"
   model: "/models/Qwen3-Embedding-4B"
-  api_key: "EMPTY"
+  api_key: "${VLLM_API_KEY}"
   batch_size: 16
   max_chars: 8000
   timeout: 120
@@ -224,7 +224,7 @@ retrieval:
       # ── 指向 Docker 内部 vLLM ──
       api_base: "http://vllm-llm:8000/v1"
       model: "/models/Qwen3.5-9B"
-      api_key: "EMPTY"
+      api_key: null
       disable_thinking_extra_body: true
       disable_thinking: true
       summary:
@@ -237,6 +237,7 @@ retrieval:
       # ── 指向 Docker 内部 vLLM Reranker ──
       api_base: "http://vllm-rerank:8000/v1"
       model: "/models/Qwen3-Reranker-4B"
+      api_key: "${VLLM_API_KEY}"
       top_k: 5
       quality_k: 3
       quality_threshold: 0.25
@@ -321,7 +322,7 @@ retrieval:
 generation:
   api_base: "http://vllm-llm:8000/v1"
   model: "/models/Qwen3.5-9B"
-  api_key: "EMPTY"
+  api_key: "${VLLM_API_KEY}"
   disable_thinking: true
   disable_thinking_extra_body: true
   temperature: 0

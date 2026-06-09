@@ -130,14 +130,25 @@ def _read_display_name(kb_dir: str, fallback: str) -> str:
     return fallback
 
 
-def safe_doc_stem(filename: str, kb_dir: str) -> str:
-    """由原始文件名推导文档目录名 (保留中文), 与既有目录去重。"""
+def sanitized_doc_stem(filename: str) -> str:
+    """由原始文件名推导稳定的文档目录名 / doc_id (保留中文, 不做去重改名)。
+
+    与 ``safe_doc_stem`` 的区别: 不追加 _2/_3 后缀, 因此同一 PDF 文件名总是
+    映射到同一 doc_stem (= doc_id)。用于"同一知识库再次上传时按文件名去重":
+    已入库的文献据此被跳过, 中断未入库的据此复用同一目录续灌。
+    """
     stem = os.path.splitext(os.path.basename(filename or "document.pdf"))[0]
     stem = _DOC_STEM_RE.sub("_", stem).strip().strip(".")
     if not stem:
         stem = f"doc_{uuid.uuid4().hex[:8]}"
     if len(stem) > 100:
         stem = stem[:100]
+    return stem
+
+
+def safe_doc_stem(filename: str, kb_dir: str) -> str:
+    """由原始文件名推导文档目录名 (保留中文), 与既有目录去重。"""
+    stem = sanitized_doc_stem(filename)
     # 同名去重: 不同文件不互相覆盖
     candidate = stem
     i = 2
@@ -266,14 +277,16 @@ def delete_collection(
 
 
 def _rebuild_collection(task_id: str, collection: str, directory: str) -> Dict[str, Any]:
-    """后台任务: 复用本地解析产物, 清空集合后全量重灌 (不重新解析 PDF)。"""
+    """后台任务: 复用本地已落盘的向量 (knowledge_blocks_vec.json), 清空集合后
+    逐字节重灌, 不重新 chunk / embed (向量不漂移, 不依赖 embedding 服务在线)。
+    缺 vec.json 的文档自动回退到完整 chunk→embed→store。"""
     pipe = get_pipeline()
     task_store = get_task_store()
 
     def on_progress(current, total, doc_id, status):
         task_store.update_progress(task_id, current, total, doc_id)
 
-    results = pipe.vectorize_directory(
+    results = pipe.reingest_directory(
         directory,
         collection=collection,
         recreate=True,
@@ -299,9 +312,10 @@ def rebuild_collection(
     name: str,
     _auth: str = Depends(verify_api_key),
 ) -> TaskResponse:
-    """重建知识库 (异步): 复用本地已存解析产物, 清空集合后重新向量化入库。
+    """重建知识库 (异步): 复用本地已落盘的向量, 清空集合后逐字节重灌。
 
-    不会重新解析 PDF, 仅重跑 chunk→embed→store, 适合调整分块/向量参数后刷新。
+    默认复用 knowledge_blocks_vec.json, 不重新 chunk / embed, 因此重灌结果与首次
+    入库一致, 且不依赖 embedding 服务在线; 缺 vec.json 的文档回退完整向量化。
     """
     if not name.startswith(_KB_PREFIX):
         raise HTTPException(status_code=400, detail=f"仅允许重建 {_KB_PREFIX} 前缀的集合")

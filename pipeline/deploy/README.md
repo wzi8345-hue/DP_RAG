@@ -77,7 +77,8 @@ export MODEL_DIR=/your/model/path
 ### 2. 准备数据目录
 
 ```bash
-sudo mkdir -p /data/uploads /data/mineru_result /data/uniparser_result /data/milvus
+sudo mkdir -p /data/uploads /data/mineru_result /data/uniparser_result
+sudo mkdir -p /fs_mol/wangzhengyan/dp-rag-milvus   # Milvus 向量数据
 
 # 可选: 设置数据根目录
 export DATA_DIR=/data
@@ -210,7 +211,7 @@ CUDA_VISIBLE_DEVICES=1 python -m vllm.entrypoints.openai.api_server \
 ```bash
 docker run -d --name milvus-standalone \
   -p 19530:19530 -p 9091:9091 \
-  -v /data/milvus:/var/lib/milvus \
+  -v ${MILVUS_DATA_DIR:-/fs_mol/wangzhengyan/dp-rag-milvus}:/var/lib/milvus \
   milvusdb/milvus:v2.4.17
 ```
 

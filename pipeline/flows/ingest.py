@@ -704,6 +704,149 @@ class IngestFlow:
 
         return results
 
+    def reingest_from_directory(
+        self, directory: str, recreate: Optional[bool] = None,
+        skip_existing: bool = True,
+        progress_callback: Optional[Any] = None,
+    ) -> List[IngestResult]:
+        """复用本地已落盘的 ``knowledge_blocks_vec.json`` 直接重灌 Milvus。
+
+        与 ``vectorize_from_directory`` 的区别: 不重新 chunk / embed, 而是把已有
+        向量逐字节喂回 Milvus, 因此:
+        - 重灌结果与首次入库逐字节一致 (向量不漂移)
+        - 不依赖 embedding / summary LLM 服务在线
+
+        doc_id / doc_name / publication_year 从每个 vec.json 旁的 sidecar
+        (knowledge_blocks_meta.json) 还原; doc_id 缺省回退为文档子目录名 (与首次
+        入库一致)。缺 vec.json 但有解析产物的文档, 回退到完整 chunk→embed→store。
+
+        Args:
+            directory: 知识库工作目录 (每篇文档一个子目录)
+            recreate: True 时第一篇入库前清空整个集合; None 沿用 config。
+            skip_existing: append 模式下跳过集合中已存在的 doc_id。
+            progress_callback: callback(current, total, doc_id, status)
+        """
+        if recreate is not None:
+            self._force_recreate = bool(recreate)
+
+        vec_files = sorted(
+            glob.glob(os.path.join(directory, "**", "knowledge_blocks_vec.json"), recursive=True)
+        )
+        covered_dirs = {os.path.dirname(p) for p in vec_files}
+
+        # 缺 vec.json 但有解析产物的文档 → 回退完整向量化
+        fallback: List[tuple] = []  # (content_path, output_dir, backend)
+        for pattern, backend in (
+            ("*_content_list_v2.json", "mineru"),
+            ("content_list_v2.json", "mineru"),
+            ("uniparser_result.json", "uniparser"),
+        ):
+            for content_path in glob.glob(os.path.join(directory, "**", pattern), recursive=True):
+                content_dir = os.path.dirname(content_path)
+                parent_dir = os.path.dirname(content_dir)
+                if backend == "uniparser":
+                    output_dir = content_dir
+                elif os.path.basename(parent_dir) == os.path.basename(content_dir):
+                    output_dir = parent_dir
+                else:
+                    output_dir = content_dir
+                if output_dir not in covered_dirs:
+                    fallback.append((content_path, output_dir, backend))
+        # 同一 output_dir 只回退一次
+        seen_fb: set = set()
+        fallback = [
+            (c, o, b) for c, o, b in sorted(set(fallback))
+            if not (o in seen_fb or seen_fb.add(o))
+        ]
+
+        if not vec_files and not fallback:
+            logger.warning(
+                f"目录 {directory} 中未找到 knowledge_blocks_vec.json 或解析产物"
+            )
+            return []
+
+        # append 模式下查询已有 doc_id, 自动跳过
+        existing_doc_ids: set = set()
+        is_append = not (self._force_recreate if self._force_recreate is not None
+                         else self.config.milvus.get("recreate", False))
+        if is_append and skip_existing:
+            try:
+                existing_doc_ids = self._get_ingester().list_doc_ids()
+            except Exception as e:
+                logger.warning(f"[reingest] 查询已有 doc_id 失败, 无法跳过: {e}")
+
+        total = len(vec_files) + len(fallback)
+        results: List[IngestResult] = []
+        cfg = self.config.milvus
+
+        # 1) 复用 vec.json 直灌
+        for vec_path in vec_files:
+            doc_dir = os.path.dirname(vec_path)
+            derived_doc_id = os.path.basename(os.path.normpath(doc_dir))
+            if existing_doc_ids and derived_doc_id in existing_doc_ids:
+                logger.info(f"[reingest] 跳过已存在 doc_id={derived_doc_id!r}")
+                results.append(IngestResult(
+                    steps=[IngestStepSummary(step="skip", success=True, elapsed=0.0)],
+                    doc_id=derived_doc_id,
+                ))
+                if progress_callback:
+                    try:
+                        progress_callback(len(results), total, derived_doc_id, "skipped")
+                    except Exception:
+                        pass
+                continue
+            t0 = time.time()
+            try:
+                # doc_id 显式传目录名 (与首次入库一致); doc_name / year 留空,
+                # 由 ingest_file 从 sidecar 还原 (复现真实标题等)。
+                r = self._get_ingester().ingest_file(
+                    vec_path,
+                    doc_id=derived_doc_id,
+                    purge_existing=True,
+                    batch_size=cfg.get("batch_size", 100),
+                )
+                results.append(IngestResult(
+                    steps=[IngestStepSummary(step="reingest", success=True, elapsed=time.time() - t0)],
+                    total_chunks=r.get("count", 0),
+                    doc_id=r.get("doc_id", derived_doc_id),
+                ))
+                status = "done"
+            except Exception as e:
+                logger.warning(f"[reingest] 复用 vec.json 失败 {vec_path}: {e}")
+                results.append(IngestResult(
+                    steps=[IngestStepSummary(step="reingest", success=False, elapsed=time.time() - t0, error=str(e))],
+                    doc_id=derived_doc_id,
+                ))
+                status = "failed"
+            if progress_callback:
+                try:
+                    progress_callback(len(results), total, derived_doc_id, status)
+                except Exception:
+                    pass
+
+        # 2) 缺 vec.json 的文档: 回退完整 chunk→embed→store
+        for content_path, output_dir, backend in fallback:
+            derived_doc_id = os.path.basename(os.path.normpath(output_dir))
+            logger.info(f"[reingest] 缺 vec.json, 回退完整向量化: {content_path}")
+            try:
+                result = self._vectorize_single(content_path, output_dir, backend=backend)
+                results.append(result)
+                status = "done"
+            except Exception as e:
+                logger.warning(f"[reingest] 回退向量化失败 {content_path}: {e}")
+                results.append(IngestResult(
+                    steps=[IngestStepSummary(step="store", success=False, elapsed=0.0, error=str(e))],
+                    doc_id=derived_doc_id,
+                ))
+                status = "failed"
+            if progress_callback:
+                try:
+                    progress_callback(len(results), total, derived_doc_id, status)
+                except Exception:
+                    pass
+
+        return results
+
     def _vectorize_single(
         self, content_path: str, output_dir: str, backend: str = "mineru",
     ) -> IngestResult:

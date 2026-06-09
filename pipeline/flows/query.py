@@ -380,6 +380,7 @@ class QueryFlow:
                     reranker_client = RerankerClient(
                         api_base=rerank_cfg.get("api_base", "http://localhost:8001/v1"),
                         model=rerank_cfg.get("model", "Qwen/Qwen3-Reranker-0.6B"),
+                        api_key=rerank_cfg.get("api_key") or gen_cfg.get("api_key", ""),
                         top_k=int(rerank_cfg.get("top_k", 5)),
                         score_threshold=float(rerank_cfg.get("quality_threshold", 0.5)),
                         timeout=int(rerank_cfg.get("timeout", 60)),
@@ -930,6 +931,7 @@ class QueryFlow:
                 reranker_client = RerankerClient(
                     api_base=rerank_cfg.get("api_base", "http://localhost:8001/v1"),
                     model=rerank_cfg.get("model", "Qwen/Qwen3-Reranker-0.6B"),
+                    api_key=rerank_cfg.get("api_key") or self.config.generation.get("api_key", ""),
                     top_k=int(rerank_cfg.get("top_k", 5)),
                     score_threshold=float(rerank_cfg.get("quality_threshold", 0.5)),
                     timeout=int(rerank_cfg.get("timeout", 60)),

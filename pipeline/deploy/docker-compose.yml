@@ -4,6 +4,8 @@ version: "3.8"
 x-common-env: &common-env
   # API Key 认证 (逗号分隔; 留空则不鉴权)
   API_KEYS: ""
+  # vLLM 三个服务共用; 须与 vllm-* 容器的 --api-key 一致
+  VLLM_API_KEY: "${VLLM_API_KEY:-dp_rag_vllm_sk_8f3a9c2e1b7d4f6a}"
   # Milvus / 远程 API 的认证信息
   MINERU_AUTHORIZATION: "${MINERU_AUTHORIZATION:-}"
   UNIPARSER_API_KEY: "${UNIPARSER_API_KEY:-}"
@@ -21,7 +23,7 @@ services:
       - "19530:19530"
       - "9091:9091"
     volumes:
-      - milvus-data:/var/lib/milvus
+      - ${MILVUS_DATA_DIR:-/fs_mol/wangzhengyan/dp-rag-milvus}:/var/lib/milvus
       - ./embedEtcd.yaml:/milvus/configs/embedEtcd.yaml
       - ./user.yaml:/milvus/configs/user.yaml
     environment:
@@ -50,6 +52,7 @@ services:
       --model /models/Qwen3.5-9B
       --served-model-name /models/Qwen3.5-9B
       --port 8000
+      --api-key ${VLLM_API_KEY:-dp_rag_vllm_sk_8f3a9c2e1b7d4f6a}
       --max-model-len 8192
       --gpu-memory-utilization 0.90
       --enable-auto-tool-choice
@@ -75,6 +78,7 @@ services:
       --model /models/Qwen3-Reranker-4B
       --served-model-name /models/Qwen3-Reranker-4B
       --port 8000
+      --api-key ${VLLM_API_KEY:-dp_rag_vllm_sk_8f3a9c2e1b7d4f6a}
       --gpu-memory-utilization 0.85
       --trust-remote-code
     healthcheck:
@@ -97,6 +101,7 @@ services:
       --model /models/Qwen3-Embedding-4B
       --served-model-name /models/Qwen3-Embedding-4B
       --port 8000
+      --api-key ${VLLM_API_KEY:-dp_rag_vllm_sk_8f3a9c2e1b7d4f6a}
       --gpu-memory-utilization 0.45
       --trust-remote-code
     healthcheck:
@@ -136,6 +141,3 @@ services:
       milvus:
         condition: service_healthy
     restart: unless-stopped
-
-volumes:
-  milvus-data:

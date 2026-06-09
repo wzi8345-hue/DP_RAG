@@ -9,7 +9,7 @@
 set -uo pipefail
 
 SSH_HOST="root@221.194.152.152"
-SSH_PORT="8010"
+SSH_PORT="12638"
 SSH_KEY="$HOME/.ssh/id_ed25519"
 # 需要转发的端口（本地:127.0.0.1:远程 一一对应）
 FORWARD_PORTS=(8000 8001 8002 19530 3000)
