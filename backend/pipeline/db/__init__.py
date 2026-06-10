@@ -12,8 +12,10 @@ from .models import (
     Conversation,
     ConversationShare,
     Document,
+    GenerationRun,
     KbCollection,
     Message,
+    MessageEvent,
     UserSkill,
 )
 
@@ -27,7 +29,9 @@ __all__ = [
     "Conversation",
     "ConversationShare",
     "Document",
+    "GenerationRun",
     "KbCollection",
     "Message",
+    "MessageEvent",
     "UserSkill",
 ]

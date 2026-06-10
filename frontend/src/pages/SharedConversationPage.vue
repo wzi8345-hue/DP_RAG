@@ -6,6 +6,7 @@ import { NButton } from 'naive-ui'
 import { useApi } from '@/composables/useApi'
 import { redirectUri } from '@/auth/logto'
 import { useConversationsStore } from '@/stores/conversations'
+import type { BackendConversationPayload } from '@/api/types'
 import MarkdownMessage from '@/components/MarkdownMessage.vue'
 
 const route = useRoute()
@@ -17,7 +18,7 @@ const { isAuthenticated, signIn } = useLogto()
 const loading = ref(true)
 const copying = ref(false)
 const error = ref('')
-const conversation = ref<Record<string, unknown> | null>(null)
+const conversation = ref<BackendConversationPayload | null>(null)
 
 const token = computed(() => String(route.params.token || ''))
 const messages = computed(() => {
@@ -43,7 +44,7 @@ async function load() {
   error.value = ''
   try {
     const res = await api.getSharedConversation(token.value)
-    conversation.value = res.conversation as Record<string, unknown>
+    conversation.value = res.conversation
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -60,7 +61,7 @@ async function continueConversation() {
   try {
     const copied = await api.copySharedConversationToMine(token.value)
     const res = await api.getConversation(copied.conversation_id)
-    store.importBackend(res.conversation as Record<string, unknown>)
+    store.importBackend(res.conversation)
     await router.push('/chat')
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)

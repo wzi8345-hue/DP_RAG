@@ -48,6 +48,44 @@ SCHEMA_STATEMENTS: list[str] = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id)",
     "CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id)",
+    # ── 生成运行（生产级异步 run） ───────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS generation_runs (
+        id                   text PRIMARY KEY,
+        conversation_id      text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        user_message_id      text NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        assistant_message_id text NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        owner_id             text NOT NULL,
+        org_id               text,
+        status               text NOT NULL DEFAULT 'queued',
+        params               jsonb,
+        error                text,
+        cancel_requested     boolean NOT NULL DEFAULT false,
+        redis_stream         text,
+        artifact_prefix      text,
+        created_at           timestamptz NOT NULL DEFAULT now(),
+        updated_at           timestamptz NOT NULL DEFAULT now(),
+        started_at           timestamptz,
+        finished_at          timestamptz
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_generation_runs_conv ON generation_runs(conversation_id)",
+    "CREATE INDEX IF NOT EXISTS idx_generation_runs_assistant ON generation_runs(assistant_message_id)",
+    "CREATE INDEX IF NOT EXISTS idx_generation_runs_owner ON generation_runs(owner_id)",
+    "CREATE INDEX IF NOT EXISTS idx_generation_runs_status ON generation_runs(status)",
+    # ── 生成事件（持久化 SSE 回放） ─────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS message_events (
+        id         bigserial PRIMARY KEY,
+        run_id     text NOT NULL REFERENCES generation_runs(id) ON DELETE CASCADE,
+        seq        bigint NOT NULL,
+        type       text NOT NULL,
+        payload    jsonb NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (run_id, seq)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_message_events_run_seq ON message_events(run_id, seq)",
     # ── 文献库归属与可见性 ──────────────────────────────────
     """
     CREATE TABLE IF NOT EXISTS kb_collections (

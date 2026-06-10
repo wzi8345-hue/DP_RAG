@@ -1,0 +1,106 @@
+"""Redis runtime helpers for generation run queue and live event streams."""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass(frozen=True)
+class RedisSettings:
+    url: str
+    queue_name: str = "dprag:generation:runs"
+    stream_prefix: str = "dprag:generation:stream"
+    stream_maxlen: int = 2000
+    stream_ttl_s: int = 86400
+
+
+def load_settings() -> RedisSettings | None:
+    url = os.environ.get("REDIS_URL", "").strip()
+    if not url:
+        return None
+    return RedisSettings(
+        url=url,
+        queue_name=os.environ.get("REDIS_RUN_QUEUE", "dprag:generation:runs").strip()
+        or "dprag:generation:runs",
+        stream_prefix=os.environ.get("REDIS_RUN_STREAM_PREFIX", "dprag:generation:stream").strip()
+        or "dprag:generation:stream",
+        stream_maxlen=int(os.environ.get("REDIS_RUN_STREAM_MAXLEN", "2000")),
+        stream_ttl_s=int(os.environ.get("REDIS_RUN_STREAM_TTL", "86400")),
+    )
+
+
+class RedisRuntime:
+    def __init__(self, settings: RedisSettings | None = None) -> None:
+        settings = settings or load_settings()
+        if settings is None:
+            raise RuntimeError("REDIS_URL is not configured")
+        self.settings = settings
+        from redis import Redis
+
+        self.client = Redis.from_url(settings.url, decode_responses=True)
+
+    def stream_key(self, run_id: str) -> str:
+        return f"{self.settings.stream_prefix}:{run_id}"
+
+    def enqueue_run(self, run_id: str) -> None:
+        self.client.rpush(self.settings.queue_name, run_id)
+
+    def dequeue_run(self, *, timeout_s: int = 5) -> str | None:
+        item = self.client.blpop(self.settings.queue_name, timeout=timeout_s)
+        if not item:
+            return None
+        _, run_id = item
+        return str(run_id)
+
+    def publish_event(self, run_id: str, event: dict[str, Any]) -> str:
+        key = self.stream_key(run_id)
+        entry_id = self.client.xadd(
+            key,
+            {"event": json.dumps(event, ensure_ascii=False)},
+            maxlen=self.settings.stream_maxlen,
+            approximate=True,
+        )
+        self.client.expire(key, self.settings.stream_ttl_s)
+        return str(entry_id)
+
+    def read_events(
+        self,
+        run_id: str,
+        *,
+        last_id: str = "$",
+        block_ms: int = 1000,
+        count: int = 100,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        rows = self.client.xread(
+            {self.stream_key(run_id): last_id},
+            block=block_ms,
+            count=count,
+        )
+        out: list[tuple[str, dict[str, Any]]] = []
+        for _, entries in rows:
+            for entry_id, fields in entries:
+                raw = fields.get("event") if isinstance(fields, dict) else None
+                if not raw:
+                    continue
+                try:
+                    out.append((str(entry_id), json.loads(raw)))
+                except json.JSONDecodeError:
+                    continue
+        return out
+
+
+_runtime: RedisRuntime | None = None
+
+
+def configured() -> bool:
+    return load_settings() is not None
+
+
+def get_redis_runtime() -> RedisRuntime:
+    global _runtime
+    if _runtime is None:
+        _runtime = RedisRuntime()
+    return _runtime

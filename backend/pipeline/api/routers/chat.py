@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,8 +13,9 @@ from fastapi.responses import StreamingResponse
 
 from ..authz import require_read
 from ..deps import AuthContext, get_pipeline, get_session_store, require_auth
-from ..models import ChatRequest, ChatResponse
+from ..models import ChatAppendRequest, ChatAppendResponse, ChatRequest, ChatResponse, RunStatusResponse
 from ..session_logger import clear_session_log_context, set_session_log_context
+from ...clients import redis as redis_runtime
 from ...db import repo
 from ...db.models import Message
 
@@ -133,12 +135,207 @@ def _persist_assistant_message(
     return mid
 
 
+def _require_run_owner(run_id: str, auth: AuthContext):
+    run = repo.get_generation_run(run_id) if repo.available() else None
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.owner_id != auth.user_id:
+        raise HTTPException(status_code=403, detail="No permission for run")
+    return run
+
+
+def _event_payload(event) -> dict:
+    payload = dict(event.payload or {})
+    payload.setdefault("type", event.type)
+    payload["seq"] = event.seq
+    payload["run_id"] = event.run_id
+    return payload
+
+
+def _append_and_publish_event(run_id: str, event_type: str, payload: dict) -> None:
+    ev = repo.append_message_event(run_id, event_type, payload)
+    live_payload = _event_payload(ev)
+    if redis_runtime.configured():
+        redis_runtime.get_redis_runtime().publish_event(run_id, live_payload)
+
+
+@router.post("/chat/append", response_model=ChatAppendResponse)
+async def append_chat_run(
+    req: ChatAppendRequest,
+    auth: AuthContext = Depends(require_auth),
+) -> ChatAppendResponse:
+    """生产级对话入口: 只创建消息/run 并入队, 不在 Web 请求中执行生成。"""
+    if not repo.available():
+        raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    if not redis_runtime.configured():
+        raise HTTPException(status_code=503, detail="REDIS_URL 未配置")
+
+    _ensure_collection_readable(req.collection, auth)
+    conversation_id, parent_id = _conversation_for_turn(req, auth)
+    if not conversation_id:
+        raise HTTPException(status_code=500, detail="无法创建 conversation")
+
+    user_message_id = _persist_user_message(
+        conversation_id=conversation_id,
+        user_message_id=req.client_user_message_id,
+        parent_id=parent_id,
+        query=req.query,
+        params=req.model_dump(exclude={"query"}),
+    )
+    if not user_message_id:
+        raise HTTPException(status_code=500, detail="无法创建 user message")
+
+    assistant_message_id = req.client_assistant_message_id or f"m_{uuid.uuid4().hex[:16]}"
+    repo.upsert_message(
+        Message(
+            id=assistant_message_id,
+            conversation_id=conversation_id,
+            parent_id=user_message_id,
+            role="assistant",
+            content="",
+            params=req.model_dump(exclude={"query"}),
+            status="streaming",
+        )
+    )
+    repo.set_conversation_active_leaf(conversation_id, assistant_message_id)
+
+    run_id = f"run_{uuid.uuid4().hex[:16]}"
+    stream_key = redis_runtime.get_redis_runtime().stream_key(run_id)
+    repo.create_generation_run(
+        run_id=run_id,
+        conversation_id=conversation_id,
+        user_message_id=user_message_id,
+        assistant_message_id=assistant_message_id,
+        owner_id=auth.user_id,
+        org_id=auth.org_id,
+        params=req.model_dump(),
+        redis_stream=stream_key,
+        artifact_prefix=f"runs/{auth.user_id}/{run_id}",
+    )
+    _append_and_publish_event(
+        run_id,
+        "status",
+        {"type": "status", "stage": "queued", "run_id": run_id},
+    )
+    redis_runtime.get_redis_runtime().enqueue_run(run_id)
+    return ChatAppendResponse(
+        conversation_id=conversation_id,
+        user_message_id=user_message_id,
+        assistant_message_id=assistant_message_id,
+        run_id=run_id,
+        status="queued",
+    )
+
+
+@router.get("/runs/{run_id}/status", response_model=RunStatusResponse)
+def get_run_status(
+    run_id: str,
+    auth: AuthContext = Depends(require_auth),
+) -> RunStatusResponse:
+    run = _require_run_owner(run_id, auth)
+    return RunStatusResponse(
+        run_id=run.id,
+        conversation_id=run.conversation_id,
+        user_message_id=run.user_message_id,
+        assistant_message_id=run.assistant_message_id,
+        status=run.status,
+        error=run.error,
+        cancel_requested=run.cancel_requested,
+    )
+
+
+@router.post("/runs/{run_id}/stop", response_model=RunStatusResponse)
+def stop_run(
+    run_id: str,
+    auth: AuthContext = Depends(require_auth),
+) -> RunStatusResponse:
+    _require_run_owner(run_id, auth)
+    run = repo.request_generation_run_stop(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status == "stopped":
+        _append_and_publish_event(
+            run_id,
+            "error",
+            {"type": "error", "message": "stopped", "run_id": run_id},
+        )
+    return RunStatusResponse(
+        run_id=run.id,
+        conversation_id=run.conversation_id,
+        user_message_id=run.user_message_id,
+        assistant_message_id=run.assistant_message_id,
+        status=run.status,
+        error=run.error,
+        cancel_requested=run.cancel_requested,
+    )
+
+
+@router.get("/runs/{run_id}/stream")
+def stream_run(
+    run_id: str,
+    after_seq: int = 0,
+    auth: AuthContext = Depends(require_auth),
+) -> StreamingResponse:
+    """SSE: replay durable message_events, then tail Redis stream for live events."""
+    _require_run_owner(run_id, auth)
+
+    def event_generator():
+        last_seq = max(0, int(after_seq or 0))
+        last_redis_id = "$"
+        terminal_types = {"done", "error"}
+        try:
+            while True:
+                replayed = repo.list_message_events(run_id, after_seq=last_seq, limit=500)
+                for ev in replayed:
+                    payload = _event_payload(ev)
+                    last_seq = max(last_seq, ev.seq)
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                    if payload.get("type") in terminal_types:
+                        return
+
+                run = repo.get_generation_run(run_id)
+                if run and run.status in {"done", "failed", "stopped"}:
+                    # If terminal event was not observed for any reason, close after replay.
+                    return
+
+                if redis_runtime.configured():
+                    for redis_id, payload in redis_runtime.get_redis_runtime().read_events(
+                        run_id,
+                        last_id=last_redis_id,
+                        block_ms=1000,
+                        count=100,
+                    ):
+                        last_redis_id = redis_id
+                        seq = int(payload.get("seq") or 0)
+                        if seq <= last_seq:
+                            continue
+                        last_seq = seq
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                        if payload.get("type") in terminal_types:
+                            return
+                else:
+                    time.sleep(1)
+        except Exception as e:
+            logger.exception("[runs/stream] 生成器异常")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     req: ChatRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> ChatResponse:
     """多轮对话: 检索 + 生成, 返回完整结果。"""
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy /chat is disabled; use POST /chat/append and GET /runs/{run_id}/stream",
+    )
     pipe = get_pipeline()
     store = get_session_store()
     _ensure_collection_readable(req.collection, auth)
@@ -232,6 +429,10 @@ async def chat_stream(
 
         data: {"type": "error", "message": "..."}
     """
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy /chat/stream is disabled; use POST /chat/append and GET /runs/{run_id}/stream",
+    )
     pipe = get_pipeline()
     store = get_session_store()
     _ensure_collection_readable(req.collection, auth)

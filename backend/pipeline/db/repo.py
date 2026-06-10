@@ -10,7 +10,18 @@ from psycopg.types.json import Jsonb
 
 from ..auth import AuthContext
 from . import base
-from .models import Conversation, ConversationShare, Document, KbCollection, Message, UserSkill, Visibility
+from .models import (
+    Conversation,
+    ConversationShare,
+    Document,
+    GenerationRun,
+    KbCollection,
+    Message,
+    MessageEvent,
+    RunStatus,
+    UserSkill,
+    Visibility,
+)
 
 
 def _model(model, row):
@@ -403,6 +414,31 @@ def get_conversation(conversation_id: str) -> Conversation | None:
         return _model(Conversation, cur.fetchone())
 
 
+def set_conversation_active_leaf(
+    conversation_id: str,
+    active_leaf_message_id: str | None,
+    *,
+    session_id: str | None = None,
+) -> Conversation | None:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE conversations
+            SET active_leaf_message_id = %(active_leaf_message_id)s,
+                session_id = COALESCE(%(session_id)s, session_id),
+                updated_at = now()
+            WHERE id = %(conversation_id)s
+            RETURNING *
+            """,
+            {
+                "conversation_id": conversation_id,
+                "active_leaf_message_id": active_leaf_message_id,
+                "session_id": session_id,
+            },
+        )
+        return _model(Conversation, cur.fetchone())
+
+
 def list_conversations(auth: AuthContext) -> list[Conversation]:
     with base.cursor() as cur:
         cur.execute(
@@ -472,6 +508,54 @@ def upsert_message(message: Message) -> Message:
         return Message.model_validate(cur.fetchone())
 
 
+def get_message(message_id: str) -> Message | None:
+    with base.cursor() as cur:
+        cur.execute("SELECT * FROM messages WHERE id = %s", (message_id,))
+        return _model(Message, cur.fetchone())
+
+
+def update_assistant_message(
+    message_id: str,
+    *,
+    content: str | None = None,
+    hits: list[dict[str, Any]] | None = None,
+    context: str | None = None,
+    research: dict[str, Any] | None = None,
+    usage: dict[str, Any] | None = None,
+    latency_s: float | None = None,
+    status: str | None = None,
+    error: str | None = None,
+) -> Message | None:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE messages
+            SET content = COALESCE(%(content)s, content),
+                hits = COALESCE(%(hits)s, hits),
+                context = COALESCE(%(context)s, context),
+                research = COALESCE(%(research)s, research),
+                usage = COALESCE(%(usage)s, usage),
+                latency_s = COALESCE(%(latency_s)s, latency_s),
+                status = COALESCE(%(status)s, status),
+                error = %(error)s
+            WHERE id = %(id)s
+            RETURNING *
+            """,
+            {
+                "id": message_id,
+                "content": content,
+                "hits": _json(hits),
+                "context": context,
+                "research": _json(research),
+                "usage": _json(usage),
+                "latency_s": latency_s,
+                "status": status,
+                "error": error,
+            },
+        )
+        return _model(Message, cur.fetchone())
+
+
 def list_messages(conversation_id: str) -> list[Message]:
     with base.cursor() as cur:
         cur.execute(
@@ -503,6 +587,187 @@ def get_mainline_messages(conversation_id: str) -> list[Message]:
             {"leaf_id": conv.active_leaf_message_id},
         )
         return [Message.model_validate(r) for r in cur.fetchall()]
+
+
+def get_message_chain_to(message_id: str | None) -> list[Message]:
+    if not message_id:
+        return []
+    with base.cursor() as cur:
+        cur.execute(
+            """
+            WITH RECURSIVE chain AS (
+              SELECT *, 0 AS depth FROM messages WHERE id = %(message_id)s
+              UNION ALL
+              SELECT m.*, chain.depth + 1 AS depth
+              FROM messages m
+              JOIN chain ON chain.parent_id = m.id
+            )
+            SELECT id, conversation_id, parent_id, role, content, hits, context, research,
+                   usage, latency_s, params, status, error, created_at
+            FROM chain
+            ORDER BY depth DESC
+            """,
+            {"message_id": message_id},
+        )
+        return [Message.model_validate(r) for r in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Generation runs / message events
+# ---------------------------------------------------------------------------
+
+
+def create_generation_run(
+    *,
+    run_id: str,
+    conversation_id: str,
+    user_message_id: str,
+    assistant_message_id: str,
+    owner_id: str,
+    org_id: str | None = None,
+    params: dict[str, Any] | None = None,
+    redis_stream: str | None = None,
+    artifact_prefix: str | None = None,
+) -> GenerationRun:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO generation_runs(
+              id, conversation_id, user_message_id, assistant_message_id, owner_id,
+              org_id, status, params, redis_stream, artifact_prefix, updated_at
+            )
+            VALUES (
+              %(id)s, %(conversation_id)s, %(user_message_id)s, %(assistant_message_id)s,
+              %(owner_id)s, %(org_id)s, 'queued', %(params)s, %(redis_stream)s,
+              %(artifact_prefix)s, now()
+            )
+            RETURNING *
+            """,
+            {
+                "id": run_id,
+                "conversation_id": conversation_id,
+                "user_message_id": user_message_id,
+                "assistant_message_id": assistant_message_id,
+                "owner_id": owner_id,
+                "org_id": org_id,
+                "params": _json(params),
+                "redis_stream": redis_stream,
+                "artifact_prefix": artifact_prefix,
+            },
+        )
+        return GenerationRun.model_validate(cur.fetchone())
+
+
+def get_generation_run(run_id: str) -> GenerationRun | None:
+    with base.cursor() as cur:
+        cur.execute("SELECT * FROM generation_runs WHERE id = %s", (run_id,))
+        return _model(GenerationRun, cur.fetchone())
+
+
+def mark_generation_run_running(run_id: str) -> GenerationRun | None:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE generation_runs
+            SET status = 'running',
+                started_at = COALESCE(started_at, now()),
+                updated_at = now()
+            WHERE id = %(id)s AND status = 'queued' AND cancel_requested IS FALSE
+            RETURNING *
+            """,
+            {"id": run_id},
+        )
+        return _model(GenerationRun, cur.fetchone())
+
+
+def update_generation_run_status(
+    run_id: str,
+    status: RunStatus,
+    *,
+    error: str | None = None,
+) -> GenerationRun | None:
+    terminal = status in {"done", "failed", "stopped"}
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE generation_runs
+            SET status = %(status)s,
+                error = %(error)s,
+                updated_at = now(),
+                started_at = CASE
+                  WHEN %(status)s = 'running' THEN COALESCE(started_at, now())
+                  ELSE started_at
+                END,
+                finished_at = CASE
+                  WHEN %(terminal)s THEN COALESCE(finished_at, now())
+                  ELSE finished_at
+                END
+            WHERE id = %(id)s
+            RETURNING *
+            """,
+            {"id": run_id, "status": status, "error": error, "terminal": terminal},
+        )
+        return _model(GenerationRun, cur.fetchone())
+
+
+def request_generation_run_stop(run_id: str) -> GenerationRun | None:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE generation_runs
+            SET cancel_requested = true,
+                status = CASE WHEN status = 'queued' THEN 'stopped' ELSE status END,
+                finished_at = CASE WHEN status = 'queued' THEN now() ELSE finished_at END,
+                updated_at = now()
+            WHERE id = %(id)s
+            RETURNING *
+            """,
+            {"id": run_id},
+        )
+        return _model(GenerationRun, cur.fetchone())
+
+
+def generation_run_should_stop(run_id: str) -> bool:
+    with base.cursor() as cur:
+        cur.execute(
+            "SELECT cancel_requested FROM generation_runs WHERE id = %s",
+            (run_id,),
+        )
+        row = cur.fetchone()
+        return bool(row and row.get("cancel_requested"))
+
+
+def append_message_event(run_id: str, event_type: str, payload: dict[str, Any]) -> MessageEvent:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH next_seq AS (
+              SELECT COALESCE(MAX(seq), 0) + 1 AS seq
+              FROM message_events
+              WHERE run_id = %(run_id)s
+            )
+            INSERT INTO message_events(run_id, seq, type, payload)
+            SELECT %(run_id)s, next_seq.seq, %(type)s, %(payload)s
+            FROM next_seq
+            RETURNING *
+            """,
+            {"run_id": run_id, "type": event_type, "payload": _json(payload)},
+        )
+        return MessageEvent.model_validate(cur.fetchone())
+
+
+def list_message_events(run_id: str, *, after_seq: int = 0, limit: int = 1000) -> list[MessageEvent]:
+    with base.cursor() as cur:
+        cur.execute(
+            """
+            SELECT * FROM message_events
+            WHERE run_id = %(run_id)s AND seq > %(after_seq)s
+            ORDER BY seq ASC
+            LIMIT %(limit)s
+            """,
+            {"run_id": run_id, "after_seq": after_seq, "limit": limit},
+        )
+        return [MessageEvent.model_validate(r) for r in cur.fetchall()]
 
 
 def copy_conversation_mainline_to_owner(source_id: str, auth: AuthContext) -> Conversation:

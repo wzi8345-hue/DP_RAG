@@ -14,6 +14,7 @@ from pydantic import BaseModel
 Visibility = Literal["private", "org", "public"]
 Role = Literal["user", "assistant"]
 MessageStatus = Literal["pending", "streaming", "done", "failed", "stopped"]
+RunStatus = Literal["queued", "running", "done", "failed", "stopped"]
 
 
 class Conversation(BaseModel):
@@ -98,3 +99,31 @@ class ConversationShare(BaseModel):
     owner_id: str
     created_at: datetime | None = None
     revoked_at: datetime | None = None
+
+
+class GenerationRun(BaseModel):
+    id: str
+    conversation_id: str
+    user_message_id: str
+    assistant_message_id: str
+    owner_id: str
+    org_id: str | None = None
+    status: RunStatus = "queued"
+    params: dict[str, Any] | None = None
+    error: str | None = None
+    cancel_requested: bool = False
+    redis_stream: str | None = None
+    artifact_prefix: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class MessageEvent(BaseModel):
+    id: int | None = None
+    run_id: str
+    seq: int
+    type: str
+    payload: dict[str, Any]
+    created_at: datetime | None = None

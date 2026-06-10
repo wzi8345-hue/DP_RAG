@@ -18,9 +18,9 @@
 | M3 | 后端 Logto JWT 鉴权 + 用户上下文 | ☑ |
 | M4 | 后端 Postgres 消息树 + 对话 CRUD + 分叉重生成 | ☑ |
 | M5 | 文献库/skill 归属与可见性（private/org/public） | ☑ |
-| M6 | 「断连不停 + 重连续读 + 停止」生成解耦 | ☐ |
+| M6 | 「断连不停 + 重连续读 + 停止」生成解耦 | ☑ |
 | M7 | 多检索源抽象（literature 落地，SQL 预留） | ◐ |
-| M8 | 部署（docker-compose + Dockerfile）+ CI/CD + RustFS 对象存储 | ☑ |
+| M8 | 部署（docker-compose + Dockerfile）+ CI/CD + RustFS + Redis/Worker | ☑ |
 | M9 | 基建与约定（uv/ruff · psycopg/pydantic · POST+APIResponse · 备份） | ◐ |
 
 > 说明：M2 前端页面已实现并通过 typecheck/build/test/lint；其中依赖后端的能力（单篇文献过滤 `doc_ids`、按库列文献/删文献、可见性切换、断连重连续读）前端已接好接口，等待对应后端阶段（M4/M5/M6）落地后端点即生效。
@@ -82,10 +82,10 @@
 - ☑ #5.7 chat/query 检索范围校验：collection 必须可读；professional 自定义 skill 按当前用户可读 allowlist 过滤
 
 ### M6 · 生成解耦
-- ☐ #6.1 生成移入后台任务 + 按 message_id 缓冲
-- ☐ #6.2 `GET /messages/{id}/stream` 重连续读
-- ☐ #6.3 `POST /messages/{id}/stop` 取消标志
-- ☐ #6.4 前端断连不取消后台；重连恢复
+- ☑ #6.1 生成移入独立 `backend-worker` 服务，Web 只创建 run 并入 Redis 队列
+- ☑ #6.2 `GET /runs/{run_id}/stream`：先回放 Postgres `message_events`，再 tail Redis Stream
+- ☑ #6.3 `POST /runs/{run_id}/stop` 取消标志，worker 协作式停止
+- ☑ #6.4 前端断连不取消后台；重连通过 `run_id + seq` 回放恢复
 
 ### M7 · 多检索源
 - ◐ #7.1 `RetrievalSource` 协议 + `LiteratureSource`（`pipeline/retrieval_sources/` 已落地，待接入 QueryFlow）
@@ -109,6 +109,7 @@
 - ☑ #8.2 `frontend/Dockerfile`（多阶段：build → nginx）+ `nginx.conf`
 - ☑ #8.3 `deploy/docker-compose.yaml`（backend + postgres）+ `.env.example`
 - ☑ #8.6 RustFS/S3 compatible 对象存储服务与 env 配置（PDF 原文 + 解析产物 + 预签名 URL）
+- ☑ #8.7 Redis 服务 + 独立 `worker` compose 服务（同 backend 镜像，不暴露 HTTP）
 - ☑ #8.4 CI：变更检测（paths）+ 构建推送私有仓库镜像（DP_USERNAME/DP_PASSWORD）
 - ☑ #8.5 CI：前端变更构建并部署 GitHub Pages（CNAME rag.hal9k.one）
 
@@ -144,7 +145,8 @@
 - 2026-06-09 · UI 风格固化与优化：新增根目录 `UI_STYLE.md`（Vercel 风格源真相）。按钮去 border/shadow（主=纯色主题色 `btn-primary`，次=主题色透明填充 `btn-secondary`，`btn-outline` 已淘汰）；`chip` 去边框；新增 `--accent-soft/-hover`（随主题色派生）与 `bg-accent-soft*`、`shadow-pop`；滚动条改细 + `scrollbar-gutter: stable`（不抖动）；大圆角降到 8px、移除浮层 `shadow-lg`；分段控件改填充轨道；SettingsPage 由多卡片改为单面板 + 分割线。typecheck/build/lint 全绿。
 - 2026-06-09 · 修复登录死循环（M1 #1.4）：`App.vue` 原先用 `@logto/vue` 的 `isLoading` 作为渲染门控；而 `isLoading` 在每次 `getAccessToken/fetchUserInfo` 时都会翻 true，导致 AppLayout 挂载→触发请求→isLoading=true→卸载→resolve 后重新挂载→再请求…的死循环，持续打后端。改为用 `isLoading` 锁存「首次鉴权完成」一次（`initialAuthChecked`），之后仅按 `isAuthenticated` 门控，AppLayout 不再被反复挂载/卸载。
 - 2026-06-09 · 引用跳转 + 对象存储 + 三级权限：新增 RustFS/S3 client（`boto3`）与 compose 服务/env；上传入库将 PDF 与解析产物写入对象存储并落 `documents.pdf_object_key/artifact_prefix`；新增 `POST /documents/pdf-url` 预签名 URL。前端引入 `@embedpdf/vue-pdf-viewer`，SourcesPanel 增「原文」tab，点击引用角标按 `hit.page_start` 跳页。完成 `Visibility=private|org|public`、`api/authz.py`、`db/repo.py`、collections/skills/conversations/chat/query 权限接线；新增分享链接、copy-on-continue、文献库/skill copy-to-mine 与前端 public→org→mine 分组。验证：frontend typecheck 通过；后端变更文件 `py_compile` 通过（全量 ruff 仍有历史 typing/ruff 债务，见 #9.7）。
-- 下一步：M9.6 现有端点统一迁移到 POST+APIResponse（含前端 client 与协议文档）→ M6 生成解耦（断连不停/重连续读/停止）→ M7 多源融合。
+- 2026-06-10 · M6 生产级对话运行架构：新增 `generation_runs/message_events`（Postgres 权威存储 + 按 run_id/seq 回放），新增 Redis 依赖与 `pipeline/clients/redis.py`（run queue + Redis Streams），新增 `/chat/append`、`/runs/{run_id}/stream`、`/runs/{run_id}/status`、`/runs/{run_id}/stop`；新增独立 `pipeline.workers.generation` worker，从 Redis 消费 run、按 Postgres message parent chain 重建上下文、调用现有 `stream_chat_events`、双写 Postgres events 与 Redis Stream。前端 `useChat` 改为 append → subscribe run stream；compose 增 Redis 与独立 `worker` 服务。旧 `/chat` 与 `/chat/stream` 已降级为 410，避免继续走请求内生成链路。
+- 下一步：M9.6 现有端点统一迁移到 POST+APIResponse（含前端 client 与协议文档）→ M7 多源融合。
 
 ---
 
@@ -154,4 +156,4 @@
 - `funmg.dp.tech/sci-loop-api` 反代是否会重写路径前缀（影响前端 `VITE_API_BASE` 与后端 root_path）。【M8】
 - Milvus 多用户隔离：当前按集合命名 + owner 校验；如需更强隔离可评估 partition/db。【M5】
 - 文献库 copy-to-mine 当前会复制 DB metadata、本地解析产物并提交重建任务；对象存储中的 PDF key 会复用源 key。若后续实现源对象硬删除，需要补对象存储前缀级复制或引用计数。【M5】
-- 生成缓冲当前用进程内内存；多副本部署需换 Redis/PG LISTEN。【M6 风险】
+- 生成事件已改为 Postgres `message_events` + Redis Streams；后续风险在于 worker 并发/幂等、Redis Stream TTL 与 Postgres events 清理策略需要按生产负载压测调整。【M6】

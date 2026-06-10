@@ -23,6 +23,20 @@ services:
     ports:
       - '5432:5432'
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+
   rustfs:
     image: rustfs/rustfs:latest
     restart: unless-stopped
@@ -42,6 +56,8 @@ services:
     restart: unless-stopped
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       rustfs:
         condition: service_started
@@ -65,6 +81,11 @@ services:
       OBJECT_STORE_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY:-change-me-object-store}
       OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-dprag}
       OBJECT_STORE_REGION: ${OBJECT_STORE_REGION:-us-east-1}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_RUN_QUEUE: ${REDIS_RUN_QUEUE:-dprag:generation:runs}
+      REDIS_RUN_STREAM_PREFIX: ${REDIS_RUN_STREAM_PREFIX:-dprag:generation:stream}
+      REDIS_RUN_STREAM_MAXLEN: ${REDIS_RUN_STREAM_MAXLEN:-2000}
+      REDIS_RUN_STREAM_TTL: ${REDIS_RUN_STREAM_TTL:-86400}
       # ── 基建服务连接（环境变量覆盖 pipeline 配置；无需挂载 YAML） ──
       # 留空的变量会被后端忽略（保留 default_config 默认值）。
       EMBEDDING_API_BASE: ${EMBEDDING_API_BASE:-}
@@ -97,6 +118,58 @@ services:
     ports:
       - '${API_PORT:-8080}:8080'
 
+  worker:
+    image: ${BACKEND_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_started
+    command: python -m pipeline.workers.generation
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: ${DATABASE_URL}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
+      SESSION_DIR: ${SESSION_DIR:-/data/sessions}
+      OBJECT_STORE_ENDPOINT: ${OBJECT_STORE_ENDPOINT:-http://rustfs:9000}
+      OBJECT_STORE_PUBLIC_ENDPOINT: ${OBJECT_STORE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY:-dprag}
+      OBJECT_STORE_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY:-change-me-object-store}
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-dprag}
+      OBJECT_STORE_REGION: ${OBJECT_STORE_REGION:-us-east-1}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_RUN_QUEUE: ${REDIS_RUN_QUEUE:-dprag:generation:runs}
+      REDIS_RUN_STREAM_PREFIX: ${REDIS_RUN_STREAM_PREFIX:-dprag:generation:stream}
+      REDIS_RUN_STREAM_MAXLEN: ${REDIS_RUN_STREAM_MAXLEN:-2000}
+      REDIS_RUN_STREAM_TTL: ${REDIS_RUN_STREAM_TTL:-86400}
+      EMBEDDING_API_BASE: ${EMBEDDING_API_BASE:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      MILVUS_BACKEND: ${MILVUS_BACKEND:-server}
+      MILVUS_URI: ${MILVUS_URI:-}
+      MILVUS_TOKEN: ${MILVUS_TOKEN:-}
+      MILVUS_DB_NAME: ${MILVUS_DB_NAME:-}
+      MILVUS_COLLECTION: ${MILVUS_COLLECTION:-}
+      MILVUS_DIM: ${MILVUS_DIM:-}
+      LLM_API_BASE: ${LLM_API_BASE:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      RERANKER_API_BASE: ${RERANKER_API_BASE:-}
+      RERANKER_API_KEY: ${RERANKER_API_KEY:-}
+      RERANKER_MODEL: ${RERANKER_MODEL:-}
+      REFLECTION_API_BASE: ${REFLECTION_API_BASE:-}
+      REFLECTION_API_KEY: ${REFLECTION_API_KEY:-}
+      REFLECTION_MODEL: ${REFLECTION_MODEL:-}
+      PARSER_BACKEND: ${PARSER_BACKEND:-}
+      MINERU_AUTHORIZATION: ${MINERU_AUTHORIZATION:-}
+      UNIPARSER_API_KEY: ${UNIPARSER_API_KEY:-}
+      CONFIG_PATH: ${CONFIG_PATH:-}
+    volumes:
+      - rag-data:/data
+
   # 可选：自托管前端（默认部署在 GitHub Pages，可不启用此服务）
   frontend:
     image: ${FRONTEND_IMAGE}
@@ -111,5 +184,6 @@ services:
 
 volumes:
   pg-data:
+  redis-data:
   rag-data:
   rustfs-data:

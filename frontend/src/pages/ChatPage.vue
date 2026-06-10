@@ -39,12 +39,33 @@ const panelTab = ref<'summary' | 'chunks' | 'pdf'>('summary')
 const highlightNum = ref<number | null>(null)
 const sharing = ref(false)
 
-onMounted(() => {
+async function refreshConversations() {
+  try {
+    const res = await api.listConversations()
+    store.syncBackendList(res.conversations)
+  } catch {
+    /* local cache remains usable when backend is unavailable */
+  }
+}
+
+async function hydrateActiveConversation(id: string | null) {
+  if (!id) return
+  try {
+    const res = await api.getConversation(id)
+    store.importBackend(res.conversation, { activate: false })
+  } catch {
+    /* local draft or inaccessible conversation */
+  }
+}
+
+onMounted(async () => {
   store.load()
+  await refreshConversations()
   if (!store.activeId) {
     const first = store.list()[0]
     store.activeId = first ? first.id : null
   }
+  await hydrateActiveConversation(store.activeId)
 })
 
 const activeConv = computed<Conversation | null>(() =>
@@ -116,8 +137,9 @@ const sourceItems = computed<SourceItem[]>(() => {
 })
 
 // 切换会话或新消息时滚到底部，关闭来源面板
-watch(() => store.activeId, () => {
+watch(() => store.activeId, async (id) => {
   sourcesForId.value = null
+  await hydrateActiveConversation(id)
 })
 watch(
   () => messages.value.map((m) => m.content).join('|'),

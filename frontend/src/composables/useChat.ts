@@ -24,7 +24,7 @@ export interface ComposerState {
 
 /**
  * 问答编排：发送 / 停止 / 重生成 / 编辑历史重生成（分叉）。
- * 当前走后端 /chat/stream（带 access_token）；后端 M4/M6 落地后切换到消息树端点与重连续读。
+ * 当前走生产级 run 架构：append message 获取 run_id，再订阅 run SSE。
  */
 export function useChat() {
   const api = useApi()
@@ -32,6 +32,7 @@ export function useChat() {
   const { t } = useI18n()
   const busy = ref(false)
   let abort: AbortController | null = null
+  let currentRunId: string | null = null
 
   function buildRequest(
     conv: Conversation,
@@ -121,7 +122,9 @@ export function useChat() {
     }
 
     try {
-      await api.chatStream(buildRequest(conv, query, c, userMessageId, assistantId), onEvent, abort.signal)
+      const started = await api.appendChatRun(buildRequest(conv, query, c, userMessageId, assistantId))
+      currentRunId = started.run_id
+      await api.streamRun(started.run_id, onEvent, abort.signal, 0)
       const m = conv.messages[assistantId]
       if (m && m.status === 'streaming') store.patch(conv, assistantId, { status: 'done', stage: undefined })
     } catch (e) {
@@ -137,6 +140,7 @@ export function useChat() {
       }
     } finally {
       busy.value = false
+      currentRunId = null
       abort = null
       store.persist()
     }
@@ -165,6 +169,7 @@ export function useChat() {
   }
 
   function stop() {
+    if (currentRunId) void api.stopRun(currentRunId)
     abort?.abort()
   }
 

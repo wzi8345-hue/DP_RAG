@@ -83,10 +83,28 @@ export interface ChatResponse {
   research?: ResearchMeta | null
 }
 
+export interface ChatAppendResponse {
+  conversation_id: string
+  user_message_id: string
+  assistant_message_id: string
+  run_id: string
+  status: string
+}
+
+export interface RunStatusResponse {
+  run_id: string
+  conversation_id: string
+  user_message_id: string
+  assistant_message_id: string
+  status: string
+  error?: string | null
+  cancel_requested: boolean
+}
+
 export type StreamEvent =
-  | { type: 'status'; stage: string }
-  | { type: 'thinking'; content: string; round?: number; phase?: string }
-  | { type: 'text'; content: string }
+  | { type: 'status'; stage: string; seq?: number; run_id?: string }
+  | { type: 'thinking'; content: string; round?: number; phase?: string; seq?: number; run_id?: string }
+  | { type: 'text'; content: string; seq?: number; run_id?: string }
   | {
       type: 'done'
       answer?: string
@@ -101,9 +119,11 @@ export type StreamEvent =
       needs_clarify?: boolean
       no_answer?: boolean
       retry_count?: number
+      seq?: number
+      run_id?: string
       [key: string]: unknown
     }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; seq?: number; run_id?: string }
 
 // ── 知识库 / 文献 ──────────────────────────────────────────
 export interface CollectionInfo {
@@ -236,6 +256,28 @@ export interface Conversation {
   mine?: boolean
   forkedFrom?: string | null
   shareToken?: string | null
+}
+
+export interface BackendConversationPayload {
+  id: string
+  title?: string
+  sessionId?: string | null
+  visibility?: Visibility
+  messages?: Record<string, Partial<ChatMessage>>
+  rootIds?: string[]
+  activeLeafId?: string | null
+  updatedAt?: number
+  ownerId?: string | null
+  mine?: boolean
+  forkedFrom?: string | null
+}
+
+export interface ConversationListResponse {
+  conversations: BackendConversationPayload[]
+}
+
+export interface ConversationGetResponse {
+  conversation: BackendConversationPayload
 }
 
 export interface PdfUrlResponse {

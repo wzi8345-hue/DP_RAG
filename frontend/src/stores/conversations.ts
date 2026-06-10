@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { ChatMessage, Conversation, Visibility } from '@/api/types'
+import type { BackendConversationPayload, ChatMessage, Conversation, Visibility } from '@/api/types'
 
-// 前端消息树（localStorage 持久化）。后端 M4 落地后切换为 Postgres conversations/messages。
+// localStorage 仅作为 UI cache；后端 Postgres conversations/messages 是 canonical source。
 // 主线推导：从 activeLeafId 沿 parentId 递归到根，再反转。
 // 分叉：编辑历史 user 消息 → 同 parentId 新建兄弟分支；重生成 assistant → 同 parentId 新建兄弟。
 
@@ -224,9 +224,9 @@ export const useConversationsStore = defineStore('conversations', () => {
     persist()
   }
 
-  function importBackend(payload: Record<string, unknown>): Conversation {
+  function importBackend(payload: BackendConversationPayload, options: { activate?: boolean } = {}): Conversation {
     const rawMessages = (payload.messages && typeof payload.messages === 'object')
-      ? payload.messages as Record<string, Partial<ChatMessage>>
+      ? payload.messages
       : {}
     const messages: Record<string, ChatMessage> = {}
     for (const [id, raw] of Object.entries(rawMessages)) {
@@ -259,10 +259,30 @@ export const useConversationsStore = defineStore('conversations', () => {
       mine: payload.mine === true,
       forkedFrom: typeof payload.forkedFrom === 'string' ? payload.forkedFrom : null,
     }
+    if (!payload.messages && conversations.value[id]) {
+      // List payloads are canonical metadata only; keep cached messages until detail is fetched.
+      conv.messages = conversations.value[id].messages
+      conv.rootIds = conversations.value[id].rootIds
+      conv.activeLeafId = conversations.value[id].activeLeafId
+      conv.shareToken = conversations.value[id].shareToken
+    }
     conversations.value[id] = conv
-    activeId.value = id
+    if (options.activate !== false) activeId.value = id
     persist()
     return conv
+  }
+
+  function syncBackendList(payloads: BackendConversationPayload[]): void {
+    const remoteIds = new Set(payloads.map((p) => p.id))
+    for (const id of Object.keys(conversations.value)) {
+      const c = conversations.value[id]
+      const isRemoteCached = c.ownerId != null || c.mine != null || c.forkedFrom != null
+      if (isRemoteCached && !remoteIds.has(id)) delete conversations.value[id]
+    }
+    for (const p of payloads) importBackend(p, { activate: false })
+    if (activeId.value && !conversations.value[activeId.value]) activeId.value = null
+    if (!activeId.value) activeId.value = list()[0]?.id ?? null
+    persist()
   }
 
   return {
@@ -284,5 +304,6 @@ export const useConversationsStore = defineStore('conversations', () => {
     switchBranch,
     setVisibility,
     importBackend,
+    syncBackendList,
   }
 })

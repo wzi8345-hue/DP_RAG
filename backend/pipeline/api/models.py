@@ -99,6 +99,28 @@ class ChatResponse(BaseModel):
     research: Optional[Dict[str, Any]] = None
 
 
+class ChatAppendRequest(ChatRequest):
+    """生产级对话入口：创建消息与 generation run，但不在 Web 请求中生成。"""
+
+
+class ChatAppendResponse(BaseModel):
+    conversation_id: str
+    user_message_id: str
+    assistant_message_id: str
+    run_id: str
+    status: str = "queued"
+
+
+class RunStatusResponse(BaseModel):
+    run_id: str
+    conversation_id: str
+    user_message_id: str
+    assistant_message_id: str
+    status: str
+    error: str | None = None
+    cancel_requested: bool = False
+
+
 # ---------------------------------------------------------------------------
 # 灌入
 # ---------------------------------------------------------------------------
