@@ -59,10 +59,10 @@ run_if_missing milvus-standalone \
 run_if_missing vllm-embed \
   --gpus all --restart unless-stopped \
   --log-opt max-size=50m --log-opt max-file=3 \
-  -v "${WORK_DIR}/Qwen3-Embedding-4B:/models/Qwen3-Embedding-4B" \
+  -v "${WORK_DIR}/Qwen3-Embedding-4B:/Qwen3-Embedding-4B" \
   -p 8002:8002 \
   vllm/vllm-openai:latest \
-  /models/Qwen3-Embedding-4B \
+  /Qwen3-Embedding-4B \
   --host 0.0.0.0 --port 8002 \
   --api-key "${VLLM_API_KEY}" \
   --trust-remote-code \

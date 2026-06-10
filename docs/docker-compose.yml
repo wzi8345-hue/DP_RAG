@@ -54,9 +54,9 @@ services:
       - "8002:8002"
     logging: *vllm-logging
     volumes:
-      - ./Qwen3-Embedding-4B:/models/Qwen3-Embedding-4B:ro
+      - ./Qwen3-Embedding-4B:/Qwen3-Embedding-4B:ro
     command:
-      - /models/Qwen3-Embedding-4B
+      - /Qwen3-Embedding-4B
       - --host
       - "0.0.0.0"
       - --port
