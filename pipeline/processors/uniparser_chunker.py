@@ -952,7 +952,16 @@ def build_knowledge_blocks_uniparser(
                     break
             chunks.insert(insert_at, summary_chunk)
 
-    # —— cross-ref: 扫 Fig. N / Table N 字面量, 给 text/summary 挂 related_assets ——
+    # —— 章节锚点兜底 (对齐 MinerU chunker._flush_section 的 section 锚点链接): ——
+    # 同一 section 内, 每个 text/summary chunk 挂上本节所有 image/table chunk,
+    # asset chunk 反向挂回本节首个 text/summary chunk。这样即便正文没写 "图N/Fig.N",
+    # 检索侧 assets 邻域扩展也能把本节图表作为互补上下文带出 (修复"问图表找不到")。
+    # 必须在 cross-ref 之前跑 (此时 asset 的 _label 还在, 用于生成可读 label)。
+    _link_section_assets(chunks)
+
+    # —— cross-ref: 扫 Fig. N / Table N 字面量, **合并**进 related_assets ——
+    # 合并而非覆盖: 保留上面 _link_section_assets 建立的章节锚点链接, 再并入
+    # 显式交叉引用 (按 chunk_id 去重), 与 MinerU chunker 的合并语义一致。
     for c in chunks:
         if c.get("type") == "references":
             c.pop("_label", None)
@@ -960,20 +969,23 @@ def build_knowledge_blocks_uniparser(
         ref_text = (c.get("content") or "" if c["type"] in ("text", "summary")
                     else (c.get("content") or "") + " " + (c.get("context") or ""))
         refs = _scan_cross_refs(ref_text)
-        related: List[Dict[str, str]] = []
+        related: List[Dict[str, str]] = list(c.get("related_assets") or [])
+        seen_ids = {a.get("chunk_id") for a in related if isinstance(a, dict)}
         self_label = c.get("_label")
         for fig in refs.get("figures", []):
             if fig == self_label:
                 continue
             fid = figure_idx.get(fig)
-            if fid and fid != c["id"]:
+            if fid and fid != c["id"] and fid not in seen_ids:
                 related.append({"type": "image", "label": f"Fig. {fig}", "chunk_id": fid})
+                seen_ids.add(fid)
         for tab in refs.get("tables", []):
             if tab == self_label:
                 continue
             tid = table_idx.get(tab)
-            if tid and tid != c["id"]:
+            if tid and tid != c["id"] and tid not in seen_ids:
                 related.append({"type": "table", "label": f"Table {tab}", "chunk_id": tid})
+                seen_ids.add(tid)
         c["related_assets"] = related
         c.pop("_label", None)
 
@@ -984,6 +996,72 @@ def build_knowledge_blocks_uniparser(
 
 
 # ── 工具函数 ───────────────────────────────────────────────────────────
+
+
+def _link_section_assets(chunks: List[Dict[str, Any]]) -> None:
+    """章节锚点兜底: 按文档阅读序的连续 section, 双向关联本节 image/table 与
+    text/summary chunk (对齐 MinerU ``chunker._flush_section`` 的 section 锚点)。
+
+    - 每个 text/summary chunk.related_assets += 本节每个 asset (合并去重);
+    - 每个 asset chunk.related_assets += 本节首个 text/summary chunk (anchor)。
+
+    references chunk 不参与 (被引文献的图号不应链到本文图表), 同时作为分段边界。
+    合并而非覆盖: 由调用方后续的 cross-ref 再并入显式 "图N/表N" 引用。
+    asset 的 label 取其 ``_label`` (Fig./Table 编号); 没有编号则退化为类型名。
+    """
+    asset_types = ("image", "table")
+    text_types = ("text", "summary")
+    n = len(chunks)
+    i = 0
+    while i < n:
+        if chunks[i].get("type") == "references":
+            i += 1
+            continue
+        sec = chunks[i].get("section")
+        # 收集连续同 section 的一段 (遇 references 或 section 变化即断开)
+        j = i
+        run: List[Dict[str, Any]] = []
+        while j < n:
+            cj = chunks[j]
+            if cj.get("type") == "references" or cj.get("section") != sec:
+                break
+            run.append(cj)
+            j += 1
+
+        texts = [x for x in run if x.get("type") in text_types]
+        assets = [x for x in run if x.get("type") in asset_types]
+        if texts and assets:
+            # text/summary ← 本节所有 asset
+            for tc in texts:
+                rel = list(tc.get("related_assets") or [])
+                seen = {a.get("chunk_id") for a in rel if isinstance(a, dict)}
+                for ac in assets:
+                    aid = ac.get("id")
+                    if not aid or aid in seen:
+                        continue
+                    lab = ac.get("_label")
+                    if ac.get("type") == "image":
+                        label = f"Fig. {lab}" if lab else "image"
+                    else:
+                        label = f"Table {lab}" if lab else "table"
+                    rel.append({"type": ac["type"], "label": label, "chunk_id": aid})
+                    seen.add(aid)
+                tc["related_assets"] = rel
+            # asset → 本节首个 text/summary (anchor)
+            anchor = texts[0]
+            anchor_id = anchor.get("id")
+            for ac in assets:
+                rel = list(ac.get("related_assets") or [])
+                seen = {a.get("chunk_id") for a in rel if isinstance(a, dict)}
+                if anchor_id and anchor_id not in seen:
+                    rel.append({
+                        "type": anchor["type"],
+                        "label": sec or "section_text",
+                        "chunk_id": anchor_id,
+                    })
+                ac["related_assets"] = rel
+
+        i = j if j > i else i + 1
 
 
 def _is_references_section_text(section: str) -> bool:
