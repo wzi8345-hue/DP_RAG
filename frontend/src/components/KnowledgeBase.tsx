@@ -12,6 +12,12 @@ import type {
 // 避免"切走再回来像是进程停了"的错觉。
 const TASKS_STORAGE_KEY = "dp-rag-kb-tasks";
 
+// 单次 multipart 请求最多带多少篇 PDF。成千上万篇时一次性塞进一个请求会撑爆
+// 内存/文件描述符/body 解析 (历史上的 "400 parsing body")。超过该阈值就切成多批,
+// 逐批顺序提交, 每批一个后台任务。并发/限速无需改动: UniParser 触发由后端**全局
+// 限速器**跨所有任务统一限频 (默认 8/min), 分多少批都不会叠加超配额。
+const UPLOAD_BATCH_SIZE = 100;
+
 function loadPersistedTasks(): Record<string, TaskResponse> {
   try {
     const raw = localStorage.getItem(TASKS_STORAGE_KEY);
@@ -172,13 +178,55 @@ export function KnowledgeBase({ api }: { api: ApiClient }) {
       flash("请先选择或创建一个知识库", true);
       return;
     }
-    try {
-      const t = await api.uploadAndIngest(Array.from(files), collection);
-      setTasks((prev) => ({ ...prev, [t.id]: t }));
-      flash(`已提交 ${files.length} 个文件到知识库 "${collection}"（任务 ${t.id}）`);
-    } catch (e) {
-      flash(e instanceof Error ? e.message : String(e), true);
+    const all = Array.from(files);
+
+    // 文件不多: 维持原来的单请求行为 (一个任务)。
+    if (all.length <= UPLOAD_BATCH_SIZE) {
+      try {
+        const t = await api.uploadAndIngest(all, collection);
+        setTasks((prev) => ({ ...prev, [t.id]: t }));
+        flash(`已提交 ${all.length} 个文件到知识库 "${collection}"（任务 ${t.id}）`);
+      } catch (e) {
+        flash(e instanceof Error ? e.message : String(e), true);
+      }
+      return;
     }
+
+    // 成千上万篇: 切成多批顺序上传, 每批一个后台任务。逐批 await (同一时刻只有一批在
+    // 网络传输), 内存/FD 始终受控; 各批任务由后端线程池排队执行, UniParser 触发被
+    // 全局限速器统一限频, 并发/限速与单批上传一致。
+    const batches: File[][] = [];
+    for (let i = 0; i < all.length; i += UPLOAD_BATCH_SIZE) {
+      batches.push(all.slice(i, i + UPLOAD_BATCH_SIZE));
+    }
+    flash(
+      `共 ${all.length} 个文件，分 ${batches.length} 批上传（每批最多 ${UPLOAD_BATCH_SIZE} 篇），请保持页面打开…`
+    );
+    let okBatches = 0;
+    let failBatches = 0;
+    for (let bi = 0; bi < batches.length; bi++) {
+      try {
+        const t = await api.uploadAndIngest(batches[bi], collection);
+        setTasks((prev) => ({ ...prev, [t.id]: t }));
+        okBatches += 1;
+        flash(
+          `第 ${bi + 1}/${batches.length} 批已提交（${batches[bi].length} 篇，任务 ${t.id}）`
+        );
+      } catch (e) {
+        failBatches += 1;
+        flash(
+          `第 ${bi + 1}/${batches.length} 批提交失败：${
+            e instanceof Error ? e.message : String(e)
+          }`,
+          true
+        );
+      }
+    }
+    flash(
+      `分批提交完成：成功 ${okBatches} 批${
+        failBatches ? `，失败 ${failBatches} 批` : ""
+      }。各批进度见下方任务区，切换页面不影响后台灌入。`
+    );
   };
 
   const onDeleteCollection = async (name: string, label: string) => {
@@ -506,7 +554,9 @@ function UploadZone({ onFiles }: { onFiles: (f: FileList | null) => void }) {
       <p className="mt-1 text-sm text-slate-300">
         点击或拖拽 PDF 到此处上传
       </p>
-      <p className="mt-0.5 text-xs text-slate-500">支持批量上传多个文件</p>
+      <p className="mt-0.5 text-xs text-slate-500">
+        支持批量上传，成千上万篇会自动分批提交（每批 {UPLOAD_BATCH_SIZE} 篇），并发与限速不变
+      </p>
       <input
         ref={ref}
         type="file"
