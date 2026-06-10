@@ -34,6 +34,8 @@ from ..models import (
     CollectionsListResponse,
     CreateCollectionRequest,
     DeleteCollectionResponse,
+    DocumentInfo,
+    DocumentsListResponse,
     TaskResponse,
 )
 
@@ -241,6 +243,28 @@ def list_collections(
         collections.append(CollectionInfo(**info))
 
     return CollectionsListResponse(collections=collections)
+
+
+@router.get("/collections/{name}/documents", response_model=DocumentsListResponse)
+def list_collection_documents(
+    name: str,
+    _auth: str = Depends(verify_api_key),
+) -> DocumentsListResponse:
+    """列出某知识库中已入库的文献 (doc_id / 标题 / 年份 / 块数)。
+
+    数据源为 Milvus 实际入库内容, 故与列表页的 "篇文档 · 条数据块" 一致;
+    解析/灌入失败、未入库的文献不会出现在这里。集合不存在时返回空列表。
+    """
+    pipe = get_pipeline()
+    try:
+        docs = pipe.list_documents(name)
+    except Exception as e:
+        logger.warning(f"[collections] 查询 {name} 文献清单失败: {e}")
+        docs = []
+    return DocumentsListResponse(
+        collection=name,
+        documents=[DocumentInfo(**d) for d in docs],
+    )
 
 
 @router.post("/collections", response_model=CollectionInfo)

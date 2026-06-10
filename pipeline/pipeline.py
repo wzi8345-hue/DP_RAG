@@ -702,6 +702,85 @@ class Pipeline:
             logger.warning(f"[pipeline] list_doc_ids 查询失败 {collection}: {e}")
         return doc_ids
 
+    def list_documents(self, collection: str) -> List[Dict[str, Any]]:
+        """返回某集合中每篇文献的概览, 供知识库界面展示"库里有哪些文献"。
+
+        聚合 Milvus 中全部 chunk, 按 doc_id 归并, 每篇返回:
+        ``{doc_id, doc_name(标题), year, chunks(块数)}``。集合不存在返回空列表。
+        """
+        from .clients.milvus import resolve_milvus_connection
+        from pymilvus import MilvusClient
+
+        cfg = self.config.milvus
+        uri, token, db_name = resolve_milvus_connection(cfg)
+        kwargs: Dict[str, Any] = {
+            "uri": uri,
+            "keepalive_time_ms": 300_000,
+            "keepalive_timeout_ms": 60_000,
+        }
+        if token:
+            kwargs["token"] = token
+        if db_name:
+            kwargs["db_name"] = db_name
+        client = MilvusClient(**kwargs)
+
+        docs: Dict[str, Dict[str, Any]] = {}
+
+        def _ingest_row(r: Dict[str, Any]) -> None:
+            d = r.get("doc_id") or ""
+            if not d:
+                return
+            info = docs.get(d)
+            if info is None:
+                info = {"doc_id": d, "doc_name": "", "year": 0, "chunks": 0}
+                docs[d] = info
+            info["chunks"] += 1
+            if not info["doc_name"] and r.get("doc_name"):
+                info["doc_name"] = r["doc_name"]
+            if not info["year"] and r.get("publication_year"):
+                try:
+                    info["year"] = int(r["publication_year"])
+                except (TypeError, ValueError):
+                    pass
+
+        if not client.has_collection(collection):
+            return []
+        out_fields = ["doc_id", "doc_name", "publication_year"]
+        try:
+            it = client.query_iterator(
+                collection_name=collection, filter="",
+                output_fields=out_fields, batch_size=5000,
+            )
+            while True:
+                batch = it.next()
+                if not batch:
+                    break
+                for r in batch:
+                    _ingest_row(r)
+            if hasattr(it, "close"):
+                it.close()
+        except AttributeError:
+            offset, page = 0, 5000
+            while True:
+                batch = client.query(
+                    collection_name=collection, filter="",
+                    output_fields=out_fields, limit=page, offset=offset,
+                )
+                if not batch:
+                    break
+                for r in batch:
+                    _ingest_row(r)
+                if len(batch) < page:
+                    break
+                offset += page
+        except Exception as e:
+            logger.warning(f"[pipeline] list_documents 查询失败 {collection}: {e}")
+
+        for info in docs.values():
+            if not info["doc_name"]:
+                info["doc_name"] = info["doc_id"]
+        return sorted(docs.values(), key=lambda x: str(x["doc_name"]).lower())
+
     # ── 便利方法 ──────────────────────────────────────────────────────
 
     def stats(self, collection: Optional[str] = None) -> Dict[str, Any]:

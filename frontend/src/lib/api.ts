@@ -3,6 +3,7 @@ import type {
   ChatResponse,
   CollectionInfo,
   CollectionsListResponse,
+  DocumentsListResponse,
   DocSummaryResponse,
   FileUploadResponse,
   HealthResponse,
@@ -130,6 +131,14 @@ export class ApiClient {
       { headers: headers(this.settings, false) }
     );
     return handle<CollectionsListResponse>(res);
+  }
+
+  async listDocuments(name: string): Promise<DocumentsListResponse> {
+    const res = await fetch(
+      this.url(`/collections/${encodeURIComponent(name)}/documents`),
+      { headers: headers(this.settings, false) }
+    );
+    return handle<DocumentsListResponse>(res);
   }
 
   async createCollection(name: string): Promise<CollectionInfo> {

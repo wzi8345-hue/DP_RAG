@@ -1,15 +1,37 @@
 import { useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api";
-import type { CollectionInfo, TaskResponse } from "../lib/types";
+import type {
+  CollectionInfo,
+  DocumentInfo,
+  IngestResult,
+  TaskResponse,
+} from "../lib/types";
+
+// 灌入任务跑在后端 (TaskStore + 线程池, 保留 24h), 与前端页面无关。
+// 把任务持久化到 localStorage, 切换页面/刷新后重新挂载时能恢复进度,
+// 避免"切走再回来像是进程停了"的错觉。
+const TASKS_STORAGE_KEY = "dp-rag-kb-tasks";
+
+function loadPersistedTasks(): Record<string, TaskResponse> {
+  try {
+    const raw = localStorage.getItem(TASKS_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
 
 export function KnowledgeBase({ api }: { api: ApiClient }) {
   const [collections, setCollections] = useState<CollectionInfo[]>([]);
-  const [tasks, setTasks] = useState<Record<string, TaskResponse>>({});
+  const [tasks, setTasks] = useState<Record<string, TaskResponse>>(loadPersistedTasks);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [newKbName, setNewKbName] = useState("");
   const [showNewKb, setShowNewKb] = useState(false);
   const [targetCollection, setTargetCollection] = useState("");
+  const [docs, setDocs] = useState<DocumentInfo[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
   const pollRef = useRef<number | null>(null);
 
   // 加载集合列表
@@ -19,7 +41,57 @@ export function KnowledgeBase({ api }: { api: ApiClient }) {
       .catch(() => {});
   };
 
+  // 加载选中知识库的文献清单
+  const reloadDocuments = (name: string) => {
+    if (!name) {
+      setDocs([]);
+      return;
+    }
+    setDocsLoading(true);
+    api.listDocuments(name)
+      .then((r) => setDocs(r.documents))
+      .catch(() => setDocs([]))
+      .finally(() => setDocsLoading(false));
+  };
+
   useEffect(() => { reloadCollections(); }, [api]);
+
+  // 切换选中的知识库时, 拉取其文献清单
+  useEffect(() => { reloadDocuments(targetCollection); }, [targetCollection, api]);
+
+  // 重新挂载 (切回本页/刷新) 时, 用持久化的任务 ID 向后端拉取最新状态并恢复进度。
+  // 后端已无该任务 (TTL 过期或服务重启清空) 则移除。
+  useEffect(() => {
+    const ids = Object.keys(loadPersistedTasks());
+    if (ids.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      for (const id of ids) {
+        try {
+          const t = await api.getTask(id);
+          if (!cancelled) setTasks((prev) => ({ ...prev, [id]: t }));
+        } catch {
+          if (!cancelled)
+            setTasks((prev) => {
+              const next = { ...prev };
+              delete next[id];
+              return next;
+            });
+        }
+      }
+      if (!cancelled) reloadCollections();
+    })();
+    return () => { cancelled = true; };
+  }, [api]);
+
+  // 持久化任务表, 供下次挂载恢复
+  useEffect(() => {
+    try {
+      localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
+    } catch {
+      /* ignore */
+    }
+  }, [tasks]);
 
   // 轮询未完成任务
   useEffect(() => {
@@ -42,9 +114,10 @@ export function KnowledgeBase({ api }: { api: ApiClient }) {
         try {
           const t = await api.getTask(id);
           setTasks((prev) => ({ ...prev, [id]: t }));
-          // 任务完成时刷新集合列表
+          // 任务完成时刷新集合列表与当前知识库文献清单
           if (t.status === "done" || t.status === "failed") {
             reloadCollections();
+            reloadDocuments(targetCollection);
           }
         } catch {
           /* keep previous */
@@ -57,7 +130,7 @@ export function KnowledgeBase({ api }: { api: ApiClient }) {
         pollRef.current = null;
       }
     };
-  }, [tasks, api]);
+  }, [tasks, api, targetCollection]);
 
   const flash = (m: string, isErr = false) => {
     if (isErr) { setErr(m); setMsg(null); }
@@ -247,8 +320,61 @@ export function KnowledgeBase({ api }: { api: ApiClient }) {
           )}
         </Section>
 
+        {/* 文献清单: 选中知识库后展示库内已入库文献 */}
+        {targetCollection && (
+          <Section
+            title={`文献清单（${docs.length} 篇）`}
+            desc="该知识库中已入库的文献，与列表的篇数一致；上传完成后自动刷新。"
+          >
+            <div className="mb-2 flex justify-end">
+              <button
+                onClick={() => reloadDocuments(targetCollection)}
+                className="rounded-lg px-2.5 py-1 text-xs text-slate-400 transition hover:bg-slate-800/60 hover:text-slate-200"
+              >
+                ↻ 刷新
+              </button>
+            </div>
+            {docsLoading ? (
+              <p className="py-3 text-center text-sm text-slate-500">加载中…</p>
+            ) : docs.length === 0 ? (
+              <p className="py-3 text-center text-sm text-slate-500">
+                该知识库暂无已入库文献
+              </p>
+            ) : (
+              <div className="max-h-96 space-y-1.5 overflow-y-auto pr-1">
+                {docs.map((d) => (
+                  <div
+                    key={d.doc_id}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="shrink-0 text-sm">📄</span>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm text-slate-200" title={d.doc_name}>
+                          {d.doc_name}
+                        </div>
+                        {d.doc_name !== d.doc_id && (
+                          <div className="truncate text-xs text-slate-500" title={d.doc_id}>
+                            {d.doc_id}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 text-xs text-slate-400">
+                      {d.year > 0 && (
+                        <span className="rounded bg-slate-800 px-1.5 py-0.5">{d.year}</span>
+                      )}
+                      <span>{d.chunks} 块</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+        )}
+
         {/* 任务进度 */}
-        <Section title="任务进度" desc="异步灌入任务的实时进度（每 2 秒轮询）。">
+        <Section title="任务进度" desc="灌入任务在后端运行（保留 24h）；切换页面或刷新都不会中断，回到本页会自动恢复进度。">
           {Object.keys(tasks).length === 0 ? (
             <p className="text-sm text-slate-500">暂无任务</p>
           ) : (
@@ -291,49 +417,74 @@ function TaskRow({ task }: { task: TaskResponse }) {
       {task.error && (
         <div className="mt-1 text-xs text-rose-400">{task.error}</div>
       )}
-      {task.status === "done" && <TaskResultBanner result={task.result} />}
-      {task.status === "done" && task.result != null && (
-        <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-slate-950/60 p-2 text-xs text-slate-300">
-          {JSON.stringify(task.result, null, 2)}
-        </pre>
-      )}
+      {task.status === "done" && <TaskResultPanel result={task.result} />}
     </div>
   );
 }
 
-function TaskResultBanner({ result }: { result: unknown }) {
+function ResultChip({
+  tone,
+  children,
+}: {
+  tone: "ok" | "skip" | "fail" | "muted";
+  children: React.ReactNode;
+}) {
+  const cls = {
+    ok: "bg-emerald-500/15 text-emerald-300",
+    skip: "bg-amber-500/15 text-amber-300",
+    fail: "bg-rose-500/15 text-rose-300",
+    muted: "bg-slate-800 text-slate-300",
+  }[tone];
+  return <span className={`rounded px-1.5 py-0.5 text-xs ${cls}`}>{children}</span>;
+}
+
+// 灌入结果面板: 概要 chips + 逐篇可读日志 (成功 / 已存在跳过 / 失败原因)。
+function TaskResultPanel({ result }: { result: unknown }) {
   if (!result || typeof result !== "object") return null;
-  const r = result as {
-    failed?: number;
-    success?: number;
-    stored_chunks?: number;
-    failed_reasons?: { doc_id?: string; reason?: string }[];
-  };
+  const r = result as IngestResult;
+  const success = r.success ?? 0;
   const failed = r.failed ?? 0;
-  const stored = r.stored_chunks;
-  if (failed > 0) {
-    return (
-      <div className="mt-2 rounded-lg bg-rose-500/15 px-3 py-2 text-xs text-rose-300">
-        <div className="font-medium">
-          {failed} 篇灌入失败
-          {typeof stored === "number" ? `，实际入库 ${stored} 块` : ""}
+  const skipped = r.skipped_existing ?? 0;
+  const stored = r.stored_chunks ?? 0;
+  const failedMap = new Map(
+    (r.failed_reasons || []).map((f) => [f.doc_id || "", f.reason || "未知原因"])
+  );
+  const hasLog =
+    (r.skipped_files && r.skipped_files.length > 0) ||
+    (r.details && r.details.length > 0);
+  return (
+    <div className="mt-2 space-y-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {success > 0 && <ResultChip tone="ok">✓ 成功 {success} 篇</ResultChip>}
+        {skipped > 0 && (
+          <ResultChip tone="skip">⏭ 已存在跳过 {skipped} 篇</ResultChip>
+        )}
+        {failed > 0 && <ResultChip tone="fail">✗ 失败 {failed} 篇</ResultChip>}
+        <ResultChip tone="muted">入库 {stored} 块</ResultChip>
+      </div>
+      {hasLog && (
+        <div className="max-h-48 space-y-0.5 overflow-y-auto rounded-lg bg-slate-950/50 p-2 text-xs">
+          {(r.skipped_files || []).map((name, i) => (
+            <div key={`s${i}`} className="text-amber-300/90">
+              ⏭ {name} —— 已入库，跳过
+            </div>
+          ))}
+          {(r.details || []).map((d, i) => {
+            const id = d.doc_id || "(未知文档)";
+            return d.ok ? (
+              <div key={`d${i}`} className="text-emerald-300/90">
+                ✓ {id} —— 入库 {d.total_chunks ?? 0} 块
+              </div>
+            ) : (
+              <div key={`d${i}`} className="text-rose-300/90">
+                ✗ {id} —— {failedMap.get(id) || "灌入失败"}
+              </div>
+            );
+          })}
         </div>
-        {(r.failed_reasons || []).map((f, i) => (
-          <div key={i} className="mt-0.5 opacity-90">
-            · {f.doc_id || "(未知文档)"}: {f.reason || "未知原因"}
-          </div>
-        ))}
-      </div>
-    );
-  }
-  if (typeof stored === "number" && (r.success ?? 0) > 0) {
-    return (
-      <div className="mt-2 rounded-lg bg-emerald-500/15 px-3 py-2 text-xs text-emerald-300">
-        成功入库 {stored} 块（{r.success} 篇）
-      </div>
-    );
-  }
-  return null;
+      )}
+    </div>
+  );
 }
 
 function UploadZone({ onFiles }: { onFiles: (f: FileList | null) => void }) {

@@ -161,6 +161,18 @@ class CollectionsListResponse(BaseModel):
     collections: List[CollectionInfo] = []
 
 
+class DocumentInfo(BaseModel):
+    doc_id: str  # = PDF 文件名 stem
+    doc_name: str = ""  # 文献标题 (缺省回退为 doc_id)
+    year: int = 0  # 发表年份 (0 = 未知)
+    chunks: int = 0  # 该文献在集合中的数据块数
+
+
+class DocumentsListResponse(BaseModel):
+    collection: str
+    documents: List[DocumentInfo] = []
+
+
 class CreateCollectionRequest(BaseModel):
     name: str
 

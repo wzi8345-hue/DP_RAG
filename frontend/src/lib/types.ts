@@ -135,6 +135,38 @@ export interface CollectionsListResponse {
   collections: CollectionInfo[];
 }
 
+/** 知识库中一篇已入库文献的概览 (来自 Milvus 实际数据) */
+export interface DocumentInfo {
+  doc_id: string;
+  doc_name: string;
+  year: number;
+  chunks: number;
+}
+
+export interface DocumentsListResponse {
+  collection: string;
+  documents: DocumentInfo[];
+}
+
+/** 灌入任务结果 (TaskResponse.result 的形状) */
+export interface IngestResult {
+  collection?: string;
+  files?: number;
+  success?: number;
+  failed?: number;
+  skipped_existing?: number;
+  skipped_files?: string[];
+  stored_chunks?: number;
+  total_chunks?: number;
+  failed_reasons?: { doc_id?: string; reason?: string }[];
+  details?: {
+    doc_id?: string;
+    ok?: boolean;
+    total_chunks?: number;
+    steps?: { step: string; success: boolean; elapsed?: number; error?: string }[];
+  }[];
+}
+
 // ---------------------------------------------------------------------------
 // 专家技能 (Skill) 管理
 // ---------------------------------------------------------------------------
