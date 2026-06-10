@@ -299,19 +299,23 @@ def delete_collection(
                    f"默认集合 literature_chunks 不可通过此接口删除",
         )
     pipe = get_pipeline()
-    deleted = pipe.drop_collection(name)
+    # Milvus 删除是关键操作; 其结果决定接口返回的 deleted, 绝不能被本地目录清理覆盖。
+    # drop_collection 内部已校验删除真实生效, 残留会抛错。集合在 Milvus 不存在 (本就
+    # 未灌入 / 已删过) 返回 False, 视为幂等成功 (collection_existed=False)。
+    collection_existed = pipe.drop_collection(name)
 
-    # 连带清理本地工作目录 (中间产物 + 原始 PDF)
+    # 连带清理本地工作目录 (中间产物 + 原始 PDF); 失败只告警, 不影响 Milvus 删除结论。
     kb_dir = kb_workspace_dir(name)
-    if os.path.isdir(kb_dir):
+    local_existed = os.path.isdir(kb_dir)
+    if local_existed:
         try:
             shutil.rmtree(kb_dir)
-            deleted = True
             logger.info(f"[collections] 已清理本地工作目录: {kb_dir}")
         except Exception as e:
             logger.warning(f"[collections] 清理本地目录失败 {kb_dir}: {e}")
 
-    return DeleteCollectionResponse(deleted=deleted, name=name)
+    # deleted=True 表示这次确实删掉了 Milvus 集合或本地目录之一 (有东西被清理)。
+    return DeleteCollectionResponse(deleted=collection_existed or local_existed, name=name)
 
 
 def _rebuild_collection(task_id: str, collection: str, directory: str) -> Dict[str, Any]:

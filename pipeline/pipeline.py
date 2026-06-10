@@ -605,6 +605,19 @@ class Pipeline:
             if not client.has_collection(name):
                 return False
             client.drop_collection(name)
+            # 校验 Milvus 是否真的删掉了: 集合若处于 loaded 状态等边界情况, drop 可能
+            # 不生效却无异常。残留时先 release 再 drop 一次, 仍在则抛错让上层暴露真实失败,
+            # 避免接口谎报"已删除"而 Milvus 端残留。
+            if client.has_collection(name):
+                try:
+                    client.release_collection(name)
+                except Exception:
+                    pass
+                client.drop_collection(name)
+                if client.has_collection(name):
+                    raise RuntimeError(
+                        f"Milvus 集合 {name} drop 后仍存在, 删除未生效"
+                    )
         logger.info(f"[pipeline] 已删除集合: {name}")
 
         # 从 ClientRegistry 缓存中淘汰该集合的 ingester
