@@ -119,6 +119,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # 请求上下文: 注入 request_id + 记录出入口日志 (纯 ASGI, 不破坏 SSE)。
+    # 后添加 = 最外层, 先于 CORS 看到所有请求。
+    from .middleware import RequestContextMiddleware
+    app.add_middleware(RequestContextMiddleware)
+
     # 注册路由
     from .routers import admin, chat, collections, files, ingest, query, skills
     app.include_router(query.router, prefix="/api/v1", tags=["查询"])

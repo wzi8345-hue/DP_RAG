@@ -17,6 +17,7 @@ fallback 回退 + reranker + 多轮 research, 每段都有自己的 LLM 调用) 
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -52,10 +53,17 @@ def query_timeout_s() -> float:
 async def run_query_with_timeout(
     fn: Callable[..., T], *args: Any, timeout: Optional[float] = None, **kwargs: Any,
 ) -> T:
-    """在查询专用线程池里执行 ``fn``, 超过 ``timeout`` 抛 ``asyncio.TimeoutError``。"""
+    """在查询专用线程池里执行 ``fn``, 超过 ``timeout`` 抛 ``asyncio.TimeoutError``。
+
+    关键: ``run_in_executor`` 不会自动把 contextvars 复制到工作线程 (这点与
+    ``asyncio.to_thread`` 不同)。SessionLogHandler 依赖 contextvar 里的 session_id
+    归类检索日志, 因此这里显式 ``copy_context()`` 再在其中执行, 否则工作线程读不到
+    session_id, 检索日志会全部丢失。
+    """
     loop = asyncio.get_running_loop()
     executor = get_query_executor()
-    fut = loop.run_in_executor(executor, lambda: fn(*args, **kwargs))
+    ctx = contextvars.copy_context()
+    fut = loop.run_in_executor(executor, lambda: ctx.run(fn, *args, **kwargs))
     return await asyncio.wait_for(
         fut, timeout=timeout if timeout is not None else _QUERY_TIMEOUT_S
     )

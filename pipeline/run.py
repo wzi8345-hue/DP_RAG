@@ -27,12 +27,10 @@ from .flows.ingest import IngestResult
 
 
 def _setup_logging(verbose: bool = False) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    # 统一走 logging_config; CLI 默认只输出控制台 (log_file=None), 避免与 API
+    # 进程抢同一滚动文件造成竞争。
+    from .logging_config import setup_logging
+    setup_logging(level=logging.DEBUG if verbose else logging.INFO)
 
 
 def _backend_overrides(args: argparse.Namespace) -> Optional[dict]:

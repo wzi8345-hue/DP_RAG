@@ -14,7 +14,9 @@
 from __future__ import annotations
 
 import contextvars
+import json
 import logging
+import os
 import threading
 import time
 from collections import OrderedDict, deque
@@ -29,6 +31,10 @@ logger = logging.getLogger(__name__)
 
 MAX_LINES_PER_SESSION = 2000
 MAX_SESSIONS = 100
+# 落盘后最多保留多少个 session 文件 (按修改时间淘汰最旧的)。
+MAX_PERSISTED_FILES = int(os.environ.get("RETRIEVAL_LOG_MAX_FILES", "500"))
+# emit() 内进度落盘最小间隔 (秒), 避免每行都重写整文件。
+_PERSIST_THROTTLE_S = 1.0
 
 # ---------------------------------------------------------------------------
 # ContextVar: 当前请求关联的 session_id
@@ -52,7 +58,13 @@ def set_session_log_context(session_id: str, query: str = "") -> None:
 
 
 def clear_session_log_context() -> None:
-    """请求结束时调用, 清除上下文变量。"""
+    """请求结束时调用, 清除上下文变量, 并把该 session 日志最终落盘一次。"""
+    sid = _session_id_var.get()
+    if sid and _global_handler is not None:
+        try:
+            _global_handler.flush_session(sid)
+        except Exception:
+            pass
     _session_id_var.set(None)
     _session_query_var.set("")
 
@@ -148,17 +160,29 @@ class SessionLogHandler(logging.Handler):
         self,
         max_sessions: int = MAX_SESSIONS,
         max_lines: int = MAX_LINES_PER_SESSION,
+        persist_dir: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.max_sessions = max_sessions
         self.max_lines = max_lines
         self._sessions: OrderedDict[str, SessionLog] = OrderedDict()
         self._lock = threading.Lock()
+        # 检索日志落盘目录: 纯内存的检索 trace 重启即丢 (LogViewer 变空),
+        # 落盘后重启可回读最近若干 session, 排障/复盘不再断档。
+        self._persist_dir = persist_dir
+        # 每个 session 上次落盘时间, 用于节流 emit 内的高频写。
+        self._last_persist: dict[str, float] = {}
         # 日志格式: 只取时间+级别+logger名, 正文由 handler 自己拼接
         self.formatter = logging.Formatter(
             fmt="%(asctime)s %(levelname)s [%(name)s] %(message)s",
             datefmt="%H:%M:%S",
         )
+        if persist_dir:
+            try:
+                os.makedirs(persist_dir, exist_ok=True)
+                self._load_persisted()
+            except Exception as e:
+                logger.warning(f"[session-log] 初始化落盘目录失败 (仅内存): {e}")
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -200,19 +224,144 @@ class SessionLogHandler(logging.Handler):
                     query = get_current_session_query()
                     slog = SessionLog(session_id=session_id, query=query)
                     self._sessions[session_id] = slog
-                    # 超出上限时淘汰最不活跃的 session
+                    # 超出上限时淘汰最不活跃的 session (仅内存; 磁盘文件另由
+                    # _prune_persisted 按文件数淘汰, 故重启仍可回读历史)。
                     if len(self._sessions) > self.max_sessions:
                         # 移除 updated_at 最早的
                         oldest_key = next(iter(self._sessions))
                         self._sessions.pop(oldest_key)
+                        self._last_persist.pop(oldest_key, None)
+                    if self._persist_dir:
+                        self._prune_persisted()
                 else:
                     # 移到末尾 (LRU touch)
                     self._sessions.move_to_end(session_id)
 
                 slog.append(line)
+
+                # 节流落盘: 首行或距上次 >_PERSIST_THROTTLE_S 才重写文件,
+                # 请求结束时 clear_session_log_context() 会再 flush 一次最终态。
+                if self._persist_dir:
+                    now = line.ts or time.time()
+                    last = self._last_persist.get(session_id, 0.0)
+                    if now - last >= _PERSIST_THROTTLE_S:
+                        self._last_persist[session_id] = now
+                        self._write_session_file(slog)
         except Exception:
             # handler 内部异常绝对不能影响业务逻辑
             self.handleError(record)
+
+    # ── 落盘 / 回读 ───────────────────────────────────────────────────
+
+    def _session_file_path(self, session_id: str) -> Optional[str]:
+        if not self._persist_dir:
+            return None
+        # session_id 是 hex/8-16 位, 直接用作文件名 (无路径分隔风险)。
+        safe = "".join(c for c in session_id if c.isalnum() or c in "-_")
+        if not safe:
+            return None
+        return os.path.join(self._persist_dir, f"{safe}.json")
+
+    def _write_session_file(self, slog: "SessionLog") -> None:
+        """原子写一个 session 的全部日志到磁盘 (调用方持有 self._lock)。"""
+        path = self._session_file_path(slog.session_id)
+        if not path:
+            return
+        payload = {
+            "session_id": slog.session_id,
+            "query": slog.query,
+            "created_at": slog.created_at,
+            "updated_at": slog.updated_at,
+            "lines": [
+                {
+                    "ts": ln.ts,
+                    "timestamp": ln.timestamp,
+                    "level": ln.level,
+                    "logger_name": ln.logger_name,
+                    "message": ln.message,
+                }
+                for ln in slog.lines
+            ],
+        }
+        try:
+            tmp = f"{path}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp, path)
+        except Exception as e:
+            logger.warning(f"[session-log] 落盘失败 {slog.session_id}: {e}")
+
+    def flush_session(self, session_id: str) -> None:
+        """把指定 session 的当前日志最终落盘 (请求结束时调用)。"""
+        if not self._persist_dir:
+            return
+        with self._lock:
+            slog = self._sessions.get(session_id)
+            if slog is not None:
+                self._last_persist[session_id] = time.time()
+                self._write_session_file(slog)
+
+    def _prune_persisted(self) -> None:
+        """按文件数上限淘汰最旧的落盘文件 (调用方持有 self._lock)。"""
+        if not self._persist_dir:
+            return
+        try:
+            files = [
+                os.path.join(self._persist_dir, fn)
+                for fn in os.listdir(self._persist_dir)
+                if fn.endswith(".json")
+            ]
+            if len(files) <= MAX_PERSISTED_FILES:
+                return
+            files.sort(key=lambda p: os.path.getmtime(p))
+            for p in files[: len(files) - MAX_PERSISTED_FILES]:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"[session-log] 清理落盘文件失败: {e}")
+
+    def _load_persisted(self) -> None:
+        """启动时回读最近的 session 日志 (按修改时间取最新 max_sessions 个)。"""
+        if not self._persist_dir or not os.path.isdir(self._persist_dir):
+            return
+        try:
+            files = [
+                os.path.join(self._persist_dir, fn)
+                for fn in os.listdir(self._persist_dir)
+                if fn.endswith(".json")
+            ]
+        except Exception:
+            return
+        # 最新的在后 (与 OrderedDict LRU 一致: 末尾最活跃)
+        files.sort(key=lambda p: os.path.getmtime(p))
+        loaded = 0
+        for path in files[-self.max_sessions:]:
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                slog = SessionLog(
+                    session_id=data.get("session_id", ""),
+                    query=data.get("query", ""),
+                    created_at=data.get("created_at", time.time()),
+                    updated_at=data.get("updated_at", time.time()),
+                )
+                for ln in data.get("lines", []):
+                    slog.lines.append(LogLine(
+                        timestamp=ln.get("timestamp", ""),
+                        level=ln.get("level", "INFO"),
+                        logger_name=ln.get("logger_name", ""),
+                        message=ln.get("message", ""),
+                        ts=ln.get("ts", 0.0),
+                    ))
+                if slog.session_id:
+                    self._sessions[slog.session_id] = slog
+                    loaded += 1
+            except Exception as e:
+                logger.warning(f"[session-log] 回读 {path} 失败, 跳过: {e}")
+        if loaded:
+            logger.info(f"[session-log] 回读 {loaded} 个历史 session 检索日志")
 
     # ── 查询接口 ─────────────────────────────────────────────────────
 
@@ -292,5 +441,7 @@ _global_handler: Optional[SessionLogHandler] = None
 def get_session_log_handler() -> SessionLogHandler:
     global _global_handler
     if _global_handler is None:
-        _global_handler = SessionLogHandler()
+        _global_handler = SessionLogHandler(
+            persist_dir=os.environ.get("RETRIEVAL_LOG_DIR", "logs/retrieval"),
+        )
     return _global_handler

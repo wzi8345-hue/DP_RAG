@@ -4,16 +4,14 @@
     CONFIG_PATH=local_api_config.yaml .venv-api/bin/python run_api.py
 """
 
-import logging
 import os
 
 import uvicorn
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    datefmt="%H:%M:%S",
-)
+from pipeline.logging_config import setup_logging
+
+# 统一日志: 控制台 + 滚动文件 (logs/pipeline-api.log, 可用 LOG_FILE 覆盖)。
+setup_logging(log_file=os.environ.get("LOG_FILE", "logs/pipeline-api.log"))
 
 if __name__ == "__main__":
     uvicorn.run(
