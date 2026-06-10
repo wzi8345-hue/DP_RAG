@@ -72,6 +72,10 @@ from .chunker import (
     is_garbled_text,
     _normalize_text,
     sanitize_section,
+    # 对齐 MinerU 正文质量: 逻辑段落合并 (含误切合并/短段合并) + 期刊元数据行过滤
+    _is_metadata_line,
+    _group_logical_paragraphs,
+    _group_combined_text,
     SUMMARY_QUERY_TEXTS,
     SUMMARY_SIM_THRESHOLD,
     REFERENCES_SECTION_PATTERNS,
@@ -652,6 +656,9 @@ def build_knowledge_blocks_uniparser(
     cur_section_is_summary = False
     cur_section_is_references = False
     pending_ref_blocks: List[Dict[str, Any]] = []  # 累积 reference 块 (引用条目)
+    # 累积连续 paragraph 块, 在被非段落块 (title/公式/表/图/reference) 打断时,
+    # 用 MinerU 同款逻辑段落分组 (误切合并 + 短段合并 + 期刊元数据行丢弃) 后再成 chunk.
+    pending_para_blocks: List[Dict[str, Any]] = []
     paragraph_counter = [0]
 
     def _next_para_idx() -> int:
@@ -694,13 +701,75 @@ def build_knowledge_blocks_uniparser(
         pending_summary_texts = []
         pending_summary_pages = set()
 
+    def _flush_pending_paragraphs() -> None:
+        """把缓冲的连续 paragraph 块按 MinerU 逻辑段落分组后成 text chunk。
+
+        复用 ``_group_logical_paragraphs`` (= 误切合并 + 短段合并 + 期刊元数据行
+        丢弃), 与 MinerU 支路同款; 之后长段仍走 ``_maybe_split_text_chunk``.
+        preamble (首个 section title 之前的正文) 不占段号, 打 ``is_preamble``,
+        与 MinerU 对齐。
+        """
+        nonlocal pending_para_blocks
+        if not pending_para_blocks:
+            return
+        blocks = pending_para_blocks
+        pending_para_blocks = []
+        # 转成 MinerU content_list_v2 风格的 paragraph item, 复用其分组逻辑;
+        # 额外挂 _page 以便分组后还原页码 (分组函数不读该字段, 不受影响)。
+        mineru_items: List[Dict[str, Any]] = []
+        for pb in blocks:
+            txt = _block_text(pb)
+            if not txt:
+                continue
+            mineru_items.append({
+                "type": "paragraph",
+                "content": {"paragraph_content": [{"type": "text", "content": txt}]},
+                "_page": int(pb.get("page", 0)),
+            })
+        if not mineru_items:
+            return
+        groups = _group_logical_paragraphs(mineru_items)
+        is_preamble = (not cur_section.strip()) and not cur_section_is_summary
+        for group in groups:
+            combined = _group_combined_text(group)
+            if not combined:
+                continue
+            pages_in_group = sorted({int(it.get("_page", 0)) for it in group})
+            page = pages_in_group[0] if pages_in_group else 0
+            para_idx = -1 if is_preamble else _next_para_idx()
+            base = _build_paragraph_chunk(
+                combined, section=cur_section, page=page, paragraph_index=para_idx,
+            )
+            if not base:
+                continue
+            if pages_in_group:
+                base["pages"] = pages_in_group
+            if is_preamble:
+                base["is_preamble"] = True
+            split = _maybe_split_text_chunk(
+                base, embedder,
+                target_chars=split_target_chars,
+                max_chars=split_max_chars,
+                min_chars=split_min_chars,
+                breakpoint_percentile=split_breakpoint_percentile,
+                length_fn=split_length_fn,
+                overlap_chars=split_overlap,
+            )
+            for sc in split:
+                if "paragraph_index" not in sc:
+                    sc["paragraph_index"] = base["paragraph_index"]
+                if is_preamble and sc.get("type") == "text":
+                    sc["is_preamble"] = True
+            chunks.extend(split)
+
     # 主循环: 按全局阅读序遍历 blocks
     for idx, b in enumerate(all_blocks):
         t = b.get("type")
 
         # —— section 切换 ——
         if t == TITLE_TYPE:
-            # 在切 section 之前, 清空当前 section 的累积 (references / summary)
+            # 在切 section 之前, 清空当前 section 的累积 (正文 / references / summary)
+            _flush_pending_paragraphs()
             _flush_pending_references()
             _flush_pending_summary()
             new_section = sanitize_section(_block_text(b))
@@ -725,6 +794,7 @@ def build_knowledge_blocks_uniparser(
         # —— reference 类块在非 references section 里: 也按 references 类型聚合 ——
         # (UniParser 偶尔把零散引用判到正文段尾, 比如 last page 末尾, 没显式 title 切换)
         if t == REFERENCE_TYPE:
+            _flush_pending_paragraphs()  # reference 打断正文段, 先 flush 已缓冲的段落
             pending_ref_blocks.append(b)
             continue
         # 一旦碰到非 reference 块, 先 flush 之前累积的 reference (如果有)
@@ -734,13 +804,15 @@ def build_knowledge_blocks_uniparser(
         # —— 摘要 section: paragraph 累积, 其它类型 (公式/图/表) 仍正常出 chunk ——
         if cur_section_is_summary and t in TEXT_LIKE_TYPES:
             txt = _block_text(b)
-            if txt:
+            # 期刊元数据行 (中图分类号/DOI/收稿日期 等) 不进摘要, 与 MinerU 对齐
+            if txt and not _is_metadata_line(txt):
                 pending_summary_texts.append(txt)
                 pending_summary_pages.add(int(b.get("page", 0)))
             continue
 
         # —— equation 块 -> equation chunk ——
         if t == EQUATION_TYPE:
+            _flush_pending_paragraphs()  # 公式打断正文段, 先把缓冲段落成 chunk
             _flush_pending_summary()  # 公式作为 section 内边界, summary 先 flush
             latex = (b.get("latex_repr") or "").strip()
             if not latex:
@@ -757,6 +829,7 @@ def build_knowledge_blocks_uniparser(
 
         # —— table 块 -> table chunk ——
         if t == TABLE_TYPE:
+            _flush_pending_paragraphs()
             _flush_pending_summary()
             # source=pages_tree 时按 group_id 去重
             gid = b.get("_group_id")
@@ -774,6 +847,7 @@ def build_knowledge_blocks_uniparser(
 
         # —— imagecaption -> image chunk (锚定 1 个 logical figure, 不论它含几个子面板) ——
         if t == IMAGECAPTION_TYPE:
+            _flush_pending_paragraphs()
             _flush_pending_summary()
             # source=pages_tree 时按 group_id 去重: 同 group 多个 caption 只取一次
             gid = b.get("_group_id")
@@ -800,31 +874,11 @@ def build_knowledge_blocks_uniparser(
         if t in CAPTION_TYPES:
             continue
 
-        # —— paragraph -> text chunk (长段走 semantic_split) ——
+        # —— paragraph: 先缓冲, 在被非段落块打断 / section 结束时统一做逻辑段落分组 ——
+        # (对齐 MinerU: 误切合并 + 短段合并 + 期刊元数据行丢弃, 再走 semantic_split)
         if t in TEXT_LIKE_TYPES:
-            txt = _block_text(b)
-            if not txt:
-                continue
-            base = _build_paragraph_chunk(
-                txt, section=cur_section,
-                page=int(b.get("page", 0)),
-                paragraph_index=_next_para_idx(),
-            )
-            if not base:
-                continue
-            split = _maybe_split_text_chunk(
-                base, embedder,
-                target_chars=split_target_chars,
-                max_chars=split_max_chars,
-                min_chars=split_min_chars,
-                breakpoint_percentile=split_breakpoint_percentile,
-                length_fn=split_length_fn,
-                overlap_chars=split_overlap,
-            )
-            for sc in split:
-                if "paragraph_index" not in sc:
-                    sc["paragraph_index"] = base["paragraph_index"]
-            chunks.extend(split)
+            if _block_text(b):
+                pending_para_blocks.append(b)
             continue
 
         # —— 其它未知类型: 默默丢 (有 text 字段才记录 warning) ——
@@ -832,6 +886,7 @@ def build_knowledge_blocks_uniparser(
             logger.debug(f"[uniparser-chunker] 未处理 type={t!r} page={b.get('page')}")
 
     # —— 收尾 flush ——
+    _flush_pending_paragraphs()
     _flush_pending_summary()
     _flush_pending_references()
 
