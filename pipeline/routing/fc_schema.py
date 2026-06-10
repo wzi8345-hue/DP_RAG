@@ -144,8 +144,11 @@ _PATH_PROGRESSIVE: Dict[str, Any] = {
             "enum": ["image", "table", "equation", "references"],
             "description": (
                 "可选: chunk 类型过滤. 通常 progressive 不带 ctype (从正文池召回); "
-                "当用户问公式/图/表/参考文献时填对应值, 例如 'references' 用于"
-                "'有没有引用了 XX 的参考文献'/'看下 references' 这类全库召回参考文献的意图. "
+                "当用户问公式/图/表时填对应值. "
+                "ctype='references' **仅当**用户明确索取'引用/参考了哪些文献'(即要引文列表本身) "
+                "时填, 如 '有没有引用了 XX 的参考文献'/'看下 references/bibliography'. "
+                "【严禁误填】只提到某标准/方法/试验/规范名 (如 'ASTM 标准方法'/'用什么方法表征 X') "
+                "不是问参考文献, 是正文事实问句 → 省略 ctype. "
                 "ctype=references 时系统会在 references chunk 池里召回 (不需要给条目编号)."
             ),
         },
@@ -193,9 +196,12 @@ _PATH_LOCAL: Dict[str, Any] = {
             "type": "string",
             "enum": ["image", "table", "equation", "references"],
             "description": (
-                "可选: chunk 类型过滤. 用户在某篇文献里专门问公式/图/表/参考文献时填对应值. "
-                "例如 '这篇文献引用了哪些参考文献' → ctype=references (会全量召回该文献的"
-                "所有 references chunk, 不需要给条目编号)."
+                "可选: chunk 类型过滤. 用户在某篇文献里专门问公式/图/表时填对应值. "
+                "ctype='references' **仅当**用户明确索取该文献的引文列表本身时填, "
+                "如 '这篇文献引用了哪些参考文献'/'它的 references 有哪些' (会全量召回该文献"
+                "所有 references chunk, 不需要给条目编号). "
+                "【严禁误填】在某篇里问标准/方法/试验/数值 (如 '这篇用哪个 ASTM 标准方法') "
+                "是正文事实问句 → 省略 ctype, 不要当成参考文献."
             ),
         },
         "expand": _EXPAND_SCHEMA,

@@ -145,6 +145,19 @@ class TestRoutingCoreP0P1Guards(unittest.TestCase):
         self.assertEqual(outcome.target_doc_ids, ["only"])
         self.assertEqual(outcome.chunk_type, "references")
 
+    def test_misfired_references_without_explicit_intent_falls_back(self):
+        # query 没有显式索取"参考文献", 即便 LLM 误填了 ctype=references,
+        # 也不应弹"是哪篇文献"的澄清, 而是撤销过滤回退正文检索。
+        core = self._core(
+            {"paths": [{"t": "progressive", "kw": ["ASTM", "pitting"], "ctype": "references"}]}
+        )
+        outcome = core.route(
+            "Which ASTM standard test method was used to characterize pitting corrosion susceptibility for the Nitinol ocular device",
+            doc_registry=_registry({"doc_id": "a"}, {"doc_id": "b"}),
+        )
+        self.assertIsInstance(outcome, RouteDecision)
+        self.assertNotEqual((outcome.chunk_type or "").lower(), "references")
+
 
 if __name__ == "__main__":
     unittest.main()

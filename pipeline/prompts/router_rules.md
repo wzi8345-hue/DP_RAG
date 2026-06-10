@@ -89,10 +89,17 @@
 - chunk_type: "image" / "table" / "equation" / "references"
   - "image" / "table": 用户明确问图/表
   - "equation": 用户问公式 ("那个方程是什么" / "Hall-Petch 方程")
-  - "references": 用户问参考文献 — 任何提及 "参考文献 / 引用文献 / references /
-    bibliography / 引文 / refs" 的问句都应填; 不填时默认排除 references chunk.
-    配合 progressive (全库) 或 local (指定/回指文献) 使用, 会直接全量召回该范围内的
-    references chunk; **不需要给条目编号** — 精确编号场景占比低, 已不再单独建路径
+  - "references": **仅当**用户明确在索取"某篇文献引用/参考了哪些文献"(即要它的
+    参考文献/引文列表本身) 时才填. 必须出现显式引文列表措辞, 如 "参考文献 / 引用文献 /
+    引文列表 / 引用了哪些文献(论文/工作) / references / bibliography / works cited /
+    cited references". 配合 progressive (全库) 或 local (指定/回指文献) 使用, 会全量
+    召回该范围内的 references chunk; **不需要给条目编号**.
+    【严禁误填 — 以下都不是问参考文献, 应走 progressive/local 且**不带 ctype**】
+      · 只是提到某个标准/规范/方法/试验/型号名 ("ASTM/ISO/GB XX 标准", "XX 测试方法",
+        "用什么方法/标准表征了 X", "依据哪个标准")— 这是问正文事实, 答案在正文/表格里, 不在引文列表;
+      · 任何 "是什么 / 怎么测 / 用了哪种 X" 类正文事实问句, 即便句中带 "standard"、"method"、
+        "reference value" 等词, 也不要当成 references.
+    不填 ctype 时默认排除 references chunk (正常正文检索即可)。
 - target_docs: 字符串数组 (整篇文献标题; 与 doc_refs 二选一, 优先 doc_refs)
 - doc_refs: 1-based 整数数组 (引用"上一轮检索结果中的文献"的编号; 仅当上一轮列表非空时可用)
 - fig_refs / table_refs / entities: 字符串数组

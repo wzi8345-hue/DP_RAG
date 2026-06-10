@@ -138,6 +138,25 @@ def _decision_has_unanchored_references(decision: RouteDecision) -> bool:
     return "progressive" in (decision.routes or []) or "local" in (decision.routes or [])
 
 
+# 仅当 query 显式索取"某文献引用/参考了哪些文献"(引文列表本身) 时, 才认可 references
+# 过滤。仅提到标准/方法/试验/规范名 (如 "ASTM 标准/XX 测试方法") 不算 — 那是正文事实问句。
+_EXPLICIT_REFERENCE_PATTERNS = [
+    re.compile(r"参考文献"),
+    re.compile(r"引用文献"),
+    re.compile(r"引文"),
+    re.compile(r"引用了?哪些(文献|论文|工作)"),
+    re.compile(r"\breferences?\b", re.IGNORECASE),
+    re.compile(r"\bbibliography\b", re.IGNORECASE),
+    re.compile(r"\b(works\s+cited|cited\s+(works|references|literature))\b", re.IGNORECASE),
+]
+
+
+def _query_has_explicit_reference_intent(query: str) -> bool:
+    """query 是否显式表达了"索取参考文献/引文列表"的意图。"""
+    q = query or ""
+    return any(p.search(q) for p in _EXPLICIT_REFERENCE_PATTERNS)
+
+
 def _guard_inventory_query(
     outcome: RouteOutcome,
     *,
@@ -205,7 +224,17 @@ def _guard_ambiguous_metadata(
         ):
             ambiguous.append(dec)
         if _decision_has_unanchored_references(dec):
-            unanchored_references.append(dec)
+            # 只有 query 显式提到"参考文献/引文列表"才认可 references 检索意图;
+            # 否则视为 LLM 误判 (如把 "ASTM 标准方法" 当成引文), 撤销 ctype=references
+            # 回退正常正文检索, 不再弹"是哪篇文献"的澄清。
+            if _query_has_explicit_reference_intent(query):
+                unanchored_references.append(dec)
+            else:
+                dec.chunk_type = None
+                logger.info(
+                    f"[{cid}] [routing.route] query 未显式索取参考文献, "
+                    f"撤销误判的 ctype=references, 回退正文检索"
+                )
     if not ambiguous and not unanchored_references:
         return outcome
 
