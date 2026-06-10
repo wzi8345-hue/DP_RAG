@@ -383,6 +383,14 @@ def _ingest_upload(
     except Exception as e:
         logger.warning(f"[ingest-upload] flush 失败 {collection}: {e}")
 
+    # 文档展示名: 优先用解析出的 doc_id; 解析早期失败 (如 429) 时 doc_id 为空,
+    # 回退到上传时的文档目录名 (= 文件名 stem), 保证失败项也能显示具体是哪篇。
+    names = [os.path.basename(doc_dir) for _fp, doc_dir in items]
+
+    def _display_id(idx: int) -> str:
+        r = results[idx]
+        return (getattr(r, "doc_id", "") or "") or names[idx]
+
     ok_flags = [_file_ok(r) for r in results]
     success = sum(ok_flags)
     failed = len(results) - success
@@ -391,8 +399,8 @@ def _ingest_upload(
     stored_chunks = sum(r.total_chunks for r, ok in zip(results, ok_flags) if ok)
     total_chunks = sum(r.total_chunks for r in results)
     failed_reasons = [
-        {"doc_id": r.doc_id, "reason": _first_failure(r)}
-        for r, ok in zip(results, ok_flags) if not ok
+        {"doc_id": _display_id(idx), "reason": _first_failure(results[idx])}
+        for idx, ok in enumerate(ok_flags) if not ok
     ]
     if failed_reasons:
         logger.warning(
@@ -411,12 +419,12 @@ def _ingest_upload(
         "failed_reasons": failed_reasons,
         "details": [
             {
-                "doc_id": r.doc_id,
+                "doc_id": _display_id(idx),
                 "ok": ok,
-                "total_chunks": r.total_chunks,
-                "steps": _step_dicts(r),
+                "total_chunks": results[idx].total_chunks,
+                "steps": _step_dicts(results[idx]),
             }
-            for r, ok in zip(results, ok_flags)
+            for idx, ok in enumerate(ok_flags)
         ],
     }
 
