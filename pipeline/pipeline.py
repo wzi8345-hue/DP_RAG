@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 from .clients.client_registry import ClientRegistry, set_global_registry
@@ -539,18 +540,19 @@ class Pipeline:
 
     # ── 集合管理 ────────────────────────────────────────────────────
 
-    def list_collections(self, prefix: str = "kb_") -> List[Dict[str, Any]]:
-        """列出 Milvus 中的集合, 可按前缀过滤。
+    @contextmanager
+    def _admin_milvus_client(self):
+        """临时 MilvusClient 上下文: 用完即 close(), 避免 gRPC 连接 fd 泄漏。
 
-        Returns:
-            每个集合的 {name, row_count} 字典列表
+        管理类操作 (list/drop/flush/统计) 每次新建一个短连接; 不显式关闭会持续
+        占用文件描述符, 高频轮询 (前端列表/健康检查) 下很快耗尽 fd (EMFILE),
+        进而导致上传时 multipart 落临时文件失败 (400 parsing the body)。
         """
         from .clients.milvus import resolve_milvus_connection
+        from pymilvus import MilvusClient
 
         cfg = self.config.milvus
         uri, token, db_name = resolve_milvus_connection(cfg)
-        from pymilvus import MilvusClient
-
         kwargs: Dict[str, Any] = {
             "uri": uri,
             "keepalive_time_ms": 300_000,
@@ -561,19 +563,33 @@ class Pipeline:
         if db_name:
             kwargs["db_name"] = db_name
         client = MilvusClient(**kwargs)
-
-        all_collections = client.list_collections()
-        results: List[Dict[str, Any]] = []
-        for name in all_collections:
-            if prefix and not name.startswith(prefix):
-                continue
-            row_count = 0
+        try:
+            yield client
+        finally:
             try:
-                stats = client.get_collection_stats(name)
-                row_count = stats.get("row_count", 0)
+                client.close()
             except Exception:
                 pass
-            results.append({"name": name, "row_count": row_count})
+
+    def list_collections(self, prefix: str = "kb_") -> List[Dict[str, Any]]:
+        """列出 Milvus 中的集合, 可按前缀过滤。
+
+        Returns:
+            每个集合的 {name, row_count} 字典列表
+        """
+        results: List[Dict[str, Any]] = []
+        with self._admin_milvus_client() as client:
+            all_collections = client.list_collections()
+            for name in all_collections:
+                if prefix and not name.startswith(prefix):
+                    continue
+                row_count = 0
+                try:
+                    stats = client.get_collection_stats(name)
+                    row_count = stats.get("row_count", 0)
+                except Exception:
+                    pass
+                results.append({"name": name, "row_count": row_count})
         return results
 
     def drop_collection(self, name: str) -> bool:
@@ -589,22 +605,11 @@ class Pipeline:
 
         cfg = self.config.milvus
         uri, token, db_name = resolve_milvus_connection(cfg)
-        from pymilvus import MilvusClient
 
-        kwargs: Dict[str, Any] = {
-            "uri": uri,
-            "keepalive_time_ms": 300_000,
-            "keepalive_timeout_ms": 60_000,
-        }
-        if token:
-            kwargs["token"] = token
-        if db_name:
-            kwargs["db_name"] = db_name
-        client = MilvusClient(**kwargs)
-
-        if not client.has_collection(name):
-            return False
-        client.drop_collection(name)
+        with self._admin_milvus_client() as client:
+            if not client.has_collection(name):
+                return False
+            client.drop_collection(name)
         logger.info(f"[pipeline] 已删除集合: {name}")
 
         # 从 ClientRegistry 缓存中淘汰该集合的 ingester
@@ -624,20 +629,10 @@ class Pipeline:
         Milvus 的 get_collection_stats 只统计已封存 (sealed) 的段,
         灌入后不 flush 时 row_count 会滞后为 0, 故灌入结束后显式 flush。
         """
-        from .clients.milvus import resolve_milvus_connection
-        from pymilvus import MilvusClient
-
-        cfg = self.config.milvus
-        uri, token, db_name = resolve_milvus_connection(cfg)
-        kwargs: Dict[str, Any] = {"uri": uri}
-        if token:
-            kwargs["token"] = token
-        if db_name:
-            kwargs["db_name"] = db_name
-        client = MilvusClient(**kwargs)
         try:
-            if client.has_collection(name):
-                client.flush(name)
+            with self._admin_milvus_client() as client:
+                if client.has_collection(name):
+                    client.flush(name)
         except Exception as e:
             logger.warning(f"[pipeline] flush 集合失败 {name}: {e}")
 
@@ -647,59 +642,44 @@ class Pipeline:
         用于"同库再次上传按文件名去重": doc_id == PDF 文件名 stem, 据此跳过
         已入库文献, 只灌未入库的。
         """
-        from .clients.milvus import resolve_milvus_connection
-        from pymilvus import MilvusClient
-
-        cfg = self.config.milvus
-        uri, token, db_name = resolve_milvus_connection(cfg)
-        kwargs: Dict[str, Any] = {
-            "uri": uri,
-            "keepalive_time_ms": 300_000,
-            "keepalive_timeout_ms": 60_000,
-        }
-        if token:
-            kwargs["token"] = token
-        if db_name:
-            kwargs["db_name"] = db_name
-        client = MilvusClient(**kwargs)
-
         doc_ids: set = set()
-        if not client.has_collection(collection):
-            return doc_ids
-        # 优先 query_iterator (无 offset+limit 窗口上限); 老版本回退分页 query
-        try:
-            it = client.query_iterator(
-                collection_name=collection, filter="",
-                output_fields=["doc_id"], batch_size=5000,
-            )
-            while True:
-                batch = it.next()
-                if not batch:
-                    break
-                for r in batch:
-                    d = r.get("doc_id", "")
-                    if d:
-                        doc_ids.add(d)
-            if hasattr(it, "close"):
-                it.close()
-        except AttributeError:
-            offset, page = 0, 5000
-            while True:
-                batch = client.query(
+        with self._admin_milvus_client() as client:
+            if not client.has_collection(collection):
+                return doc_ids
+            # 优先 query_iterator (无 offset+limit 窗口上限); 老版本回退分页 query
+            try:
+                it = client.query_iterator(
                     collection_name=collection, filter="",
-                    output_fields=["doc_id"], limit=page, offset=offset,
+                    output_fields=["doc_id"], batch_size=5000,
                 )
-                if not batch:
-                    break
-                for r in batch:
-                    d = r.get("doc_id", "")
-                    if d:
-                        doc_ids.add(d)
-                if len(batch) < page:
-                    break
-                offset += page
-        except Exception as e:
-            logger.warning(f"[pipeline] list_doc_ids 查询失败 {collection}: {e}")
+                while True:
+                    batch = it.next()
+                    if not batch:
+                        break
+                    for r in batch:
+                        d = r.get("doc_id", "")
+                        if d:
+                            doc_ids.add(d)
+                if hasattr(it, "close"):
+                    it.close()
+            except AttributeError:
+                offset, page = 0, 5000
+                while True:
+                    batch = client.query(
+                        collection_name=collection, filter="",
+                        output_fields=["doc_id"], limit=page, offset=offset,
+                    )
+                    if not batch:
+                        break
+                    for r in batch:
+                        d = r.get("doc_id", "")
+                        if d:
+                            doc_ids.add(d)
+                    if len(batch) < page:
+                        break
+                    offset += page
+            except Exception as e:
+                logger.warning(f"[pipeline] list_doc_ids 查询失败 {collection}: {e}")
         return doc_ids
 
     def list_documents(self, collection: str) -> List[Dict[str, Any]]:
@@ -708,22 +688,6 @@ class Pipeline:
         聚合 Milvus 中全部 chunk, 按 doc_id 归并, 每篇返回:
         ``{doc_id, doc_name(标题), year, chunks(块数)}``。集合不存在返回空列表。
         """
-        from .clients.milvus import resolve_milvus_connection
-        from pymilvus import MilvusClient
-
-        cfg = self.config.milvus
-        uri, token, db_name = resolve_milvus_connection(cfg)
-        kwargs: Dict[str, Any] = {
-            "uri": uri,
-            "keepalive_time_ms": 300_000,
-            "keepalive_timeout_ms": 60_000,
-        }
-        if token:
-            kwargs["token"] = token
-        if db_name:
-            kwargs["db_name"] = db_name
-        client = MilvusClient(**kwargs)
-
         docs: Dict[str, Dict[str, Any]] = {}
 
         def _ingest_row(r: Dict[str, Any]) -> None:
@@ -743,38 +707,39 @@ class Pipeline:
                 except (TypeError, ValueError):
                     pass
 
-        if not client.has_collection(collection):
-            return []
         out_fields = ["doc_id", "doc_name", "publication_year"]
-        try:
-            it = client.query_iterator(
-                collection_name=collection, filter="",
-                output_fields=out_fields, batch_size=5000,
-            )
-            while True:
-                batch = it.next()
-                if not batch:
-                    break
-                for r in batch:
-                    _ingest_row(r)
-            if hasattr(it, "close"):
-                it.close()
-        except AttributeError:
-            offset, page = 0, 5000
-            while True:
-                batch = client.query(
+        with self._admin_milvus_client() as client:
+            if not client.has_collection(collection):
+                return []
+            try:
+                it = client.query_iterator(
                     collection_name=collection, filter="",
-                    output_fields=out_fields, limit=page, offset=offset,
+                    output_fields=out_fields, batch_size=5000,
                 )
-                if not batch:
-                    break
-                for r in batch:
-                    _ingest_row(r)
-                if len(batch) < page:
-                    break
-                offset += page
-        except Exception as e:
-            logger.warning(f"[pipeline] list_documents 查询失败 {collection}: {e}")
+                while True:
+                    batch = it.next()
+                    if not batch:
+                        break
+                    for r in batch:
+                        _ingest_row(r)
+                if hasattr(it, "close"):
+                    it.close()
+            except AttributeError:
+                offset, page = 0, 5000
+                while True:
+                    batch = client.query(
+                        collection_name=collection, filter="",
+                        output_fields=out_fields, limit=page, offset=offset,
+                    )
+                    if not batch:
+                        break
+                    for r in batch:
+                        _ingest_row(r)
+                    if len(batch) < page:
+                        break
+                    offset += page
+            except Exception as e:
+                logger.warning(f"[pipeline] list_documents 查询失败 {collection}: {e}")
 
         for info in docs.values():
             if not info["doc_name"]:
