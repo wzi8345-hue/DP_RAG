@@ -13,9 +13,11 @@ parsing:
 
 uniparser:
   # api_key 走环境变量 ${UNIPARSER_API_KEY} (见 .env.local)
-  # sync=true 串行解析, 天然排队; 大批量 (6000+) 不限数量, 逐篇入库。
+  # sync=true 单篇同步等待解析完成; 前端上传时开 2-3 并发 + 每分钟限 8 篇解析。
   sync: true
   request_timeout: 1800
+  upload_concurrency: 3           # 上传灌入并发线程数 (2-3)
+  upload_rate_per_minute: 8       # 每分钟最多启动 8 次解析 (防超 UniParser 配额)
   poll:
     max_retries: 240          # 异步兜底轮询次数 (sync 返回空时)
     interval: 10

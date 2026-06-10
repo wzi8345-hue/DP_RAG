@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List
+import threading
+import time as _time_mod
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from ..deps import get_pipeline, get_task_store, verify_api_key
 from ..models import IngestRequest, ParseRequest, LoadVecRequest, TaskResponse
-from ...flows.ingest import IngestResult
+from ...flows.ingest import IngestFlow, IngestResult
 from .collections import (
     _kb_meta_path,
     _write_kb_meta,
@@ -22,6 +26,48 @@ from .collections import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class _SlidingWindowRateLimiter:
+    """线程安全滑动窗口限速器: 任意 ``period`` 秒内最多放行 ``max_calls`` 次。
+
+    用于限制 UniParser 解析的启动频率 (每分钟不超过 N 次), 避免超配额。
+    """
+
+    def __init__(self, max_calls: int, period: float = 60.0) -> None:
+        self.max_calls = max(1, int(max_calls))
+        self.period = float(period)
+        self._calls: deque[float] = deque()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        """阻塞直到允许再发起一次调用 (并登记本次时间)。"""
+        while True:
+            with self._lock:
+                now = _time_mod.monotonic()
+                while self._calls and now - self._calls[0] >= self.period:
+                    self._calls.popleft()
+                if len(self._calls) < self.max_calls:
+                    self._calls.append(now)
+                    return
+                wait = self.period - (now - self._calls[0])
+            _time_mod.sleep(min(max(wait, 0.05), self.period))
+
+
+def _make_ingest_flow(pipe: Any, collection: str, backend: Optional[str]) -> IngestFlow:
+    """为单篇上传构建独立 IngestFlow (独立 Config), 供多线程并发互不干扰。
+
+    不走 ``pipe.ingest_files`` —— 后者会改写共享的 ``config.milvus['collection']``
+    并重置 ``pipe._ingest_flow``, 并发调用会互相踩。这里给每个任务一份独立 Config,
+    只共享底层 (注册表缓存的) MilvusIngester / Embedder, 它们本身可并发使用。
+    """
+    from ...config import Config
+
+    cfg = Config(pipe.config.to_dict())
+    cfg.milvus["collection"] = collection
+    if backend:
+        cfg.parsing["backend"] = backend
+    return IngestFlow(cfg)
 
 
 def _ingest_rebuild(task_id: str, directory: str) -> Dict[str, Any]:
@@ -226,21 +272,61 @@ def _ingest_upload(
     skipped_existing = skipped_existing or []
     total = len(items)
 
-    results = []
-    for idx, (fp, doc_dir) in enumerate(items, start=1):
+    # 解析后端决定并发策略: 仅 uniparser 走并发 + 限速; 其它后端保持串行 (不改既有行为)。
+    effective_backend = (
+        backend or pipe.config.parsing.get("backend") or "mineru"
+    ).strip().lower()
+    uni_cfg = pipe.config.uniparser or {}
+    if effective_backend == "uniparser":
+        concurrency = max(1, int(uni_cfg.get("upload_concurrency", 3)))
+        rate_per_min = int(uni_cfg.get("upload_rate_per_minute", 8))
+    else:
+        concurrency = 1
+        rate_per_min = 0
+    concurrency = max(1, min(concurrency, total))
+    limiter = (
+        _SlidingWindowRateLimiter(rate_per_min, 60.0) if rate_per_min > 0 else None
+    )
+    logger.info(
+        f"[ingest-upload] 开始灌入 {total} 篇 (collection={collection}, "
+        f"backend={effective_backend}, 并发={concurrency}, "
+        f"限速={rate_per_min or '无'}/min)"
+    )
+
+    results: List[IngestResult] = [None] * total  # type: ignore[list-item]
+    progress_lock = threading.Lock()
+    done_count = {"n": 0}
+
+    def _work(idx: int, fp: str, doc_dir: str) -> None:
+        # 限速针对"启动解析"这一刻: 阻塞直到本分钟配额允许, 再开始整条灌入链。
+        if limiter is not None:
+            limiter.acquire()
         try:
-            r = pipe.ingest_files(
-                [fp],
-                collection=collection,
-                output_dir=doc_dir,
-                backend=backend or None,
-            )
-            results.append(r)
-            task_store.update_progress(task_id, idx, total, os.path.basename(doc_dir))
+            flow = _make_ingest_flow(pipe, collection, backend)
+            r = flow.run([fp], output_dir=doc_dir)
         except Exception as e:
             logger.warning(f"[ingest-upload] 灌入失败 {fp}: {e}")
-            results.append(IngestResult(file_paths=[fp], steps=[]))
-            task_store.update_progress(task_id, idx, total, os.path.basename(doc_dir))
+            r = IngestResult(file_paths=[fp], steps=[])
+        results[idx] = r
+        with progress_lock:
+            done_count["n"] += 1
+            task_store.update_progress(
+                task_id, done_count["n"], total, os.path.basename(doc_dir)
+            )
+
+    if concurrency <= 1:
+        for idx, (fp, doc_dir) in enumerate(items):
+            _work(idx, fp, doc_dir)
+    else:
+        with ThreadPoolExecutor(
+            max_workers=concurrency, thread_name_prefix="ingest-upload"
+        ) as ex:
+            futures = [
+                ex.submit(_work, idx, fp, doc_dir)
+                for idx, (fp, doc_dir) in enumerate(items)
+            ]
+            for fut in futures:
+                fut.result()  # 等待全部完成 (异常已在 _work 内捕获)
 
     # flush 一次, 让列表 row_count 立即反映新灌入的数据
     try:

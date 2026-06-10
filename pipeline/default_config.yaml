@@ -39,6 +39,11 @@ uniparser:
   output_dir: "uniparser_result"
   sync: true                      # 提交时是否同步等待解析完成 (小文件推荐 true)
   request_timeout: 1800           # 单次 HTTP 超时秒数 (sync=true 时官方默认 1800)
+  # 前端"上传 PDF"批量灌入时的并发与限速 (仅 backend=uniparser 时生效):
+  #   upload_concurrency: 同时进行的灌入 (解析+分块+向量化+入库) 线程数
+  #   upload_rate_per_minute: 任意 60s 窗口内最多启动多少次解析 (= 多少篇), 防超配额
+  upload_concurrency: 3
+  upload_rate_per_minute: 8
   poll:
     max_retries: 120              # sync=false (或 sync 返回空) 时的轮询次数
     interval: 10                   # 轮询间隔 (秒)
