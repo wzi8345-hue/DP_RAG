@@ -446,6 +446,8 @@ function TaskRow({ task }: { task: TaskResponse }) {
       ? "text-emerald-300"
       : task.status === "failed"
       ? "text-rose-300"
+      : task.status === "interrupted"
+      ? "text-amber-300"
       : "text-blue-300";
   const pct = Math.round((task.progress || 0) * 100);
   return (

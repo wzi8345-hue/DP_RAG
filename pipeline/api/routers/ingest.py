@@ -10,7 +10,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from ..deps import get_pipeline, get_task_store, verify_api_key
 from ..models import IngestRequest, ParseRequest, LoadVecRequest, TaskResponse
@@ -26,6 +26,13 @@ from .collections import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# 单请求上传硬上限: 防止一次 multipart 塞太多文件撑爆内存/文件描述符/body 解析
+# (历史 "400 parsing body" 根因)。前端已按 100 篇分批, 但那是客户端君子协定;
+# 这里是后端防线, 对直连 API 的调用方 (脚本/curl/未来客户端) 同样生效。
+# 阈值留有余量 (>前端批大小), 可用环境变量覆盖; 超限返回 413 而非等它崩。
+_UPLOAD_MAX_FILES = int(os.environ.get("UPLOAD_MAX_FILES", "200"))
+_UPLOAD_MAX_TOTAL_MB = int(os.environ.get("UPLOAD_MAX_TOTAL_MB", "500"))
 
 
 class _SlidingWindowRateLimiter:
@@ -447,6 +454,28 @@ async def ingest_upload(
     """
     import uuid
     import time as _time
+
+    # ── 后端硬上限: 文件数 / 总体积 (超限直接 413, 不读入内存) ───────────────
+    if len(files) > _UPLOAD_MAX_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"单次最多上传 {_UPLOAD_MAX_FILES} 个文件 (本次 {len(files)} 个); "
+                f"请分批上传 (前端会自动分批)。"
+            ),
+        )
+    # UploadFile.size 来自 multipart spooled 大小, 无需读 body 即可累加;
+    # 个别环境拿不到 size 时回退 0, 仅按文件数兜底。
+    total_bytes = sum(int(getattr(f, "size", 0) or 0) for f in files)
+    max_total_bytes = _UPLOAD_MAX_TOTAL_MB * 1024 * 1024
+    if total_bytes > max_total_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"单次上传总大小 {total_bytes / 1024 / 1024:.0f}MB 超过上限 "
+                f"{_UPLOAD_MAX_TOTAL_MB}MB; 请分批上传或减少单批文件数。"
+            ),
+        )
 
     # 与新建保持一致: 支持中文名 (解析为 ASCII slug); 已是 kb_ 名时幂等
     safe_collection = make_collection_slug(collection)

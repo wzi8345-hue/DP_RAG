@@ -6,6 +6,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends
 
+from ..concurrency import query_timeout_s, run_query_with_timeout
 from ..deps import get_pipeline, verify_api_key
 from ..models import QueryRequest, QueryResponse
 from ..session_logger import clear_session_log_context, set_session_log_context
@@ -25,7 +26,7 @@ async def query(
     log_session = uuid.uuid4().hex[:8]
     set_session_log_context(log_session, req.query)
     try:
-        result = await asyncio.to_thread(
+        result = await run_query_with_timeout(
             pipe.query,
             query=req.query,
             mode=req.mode,
@@ -34,6 +35,15 @@ async def query(
             use_agentic=req.use_agentic,
             professional=req.professional,
             collection=req.collection,
+        )
+    except asyncio.TimeoutError:
+        return QueryResponse(
+            query=req.query,
+            error=(
+                f"查询超时 (>{int(query_timeout_s())}s), 已中止返回。"
+                "请缩小问题范围或稍后重试。"
+            ),
+            correlation_id=log_session,
         )
     finally:
         clear_session_log_context()

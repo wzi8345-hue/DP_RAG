@@ -82,7 +82,7 @@ export interface ChatResponse extends QueryResponse {
 
 export interface TaskResponse {
   id: string;
-  status: "pending" | "running" | "done" | "failed" | string;
+  status: "pending" | "running" | "done" | "failed" | "interrupted" | string;
   progress: number;
   result?: unknown;
   error?: string | null;

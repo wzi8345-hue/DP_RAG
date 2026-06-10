@@ -78,6 +78,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     task_store = TaskStore(
         max_workers=int(os.environ.get("TASK_MAX_WORKERS", "2")),
+        persist_dir=os.environ.get("TASK_DIR", "logs/tasks"),
     )
 
     # API Keys: 逗号分隔, 空则不鉴权
@@ -94,6 +95,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     session_store.shutdown()
     task_store.shutdown()
+    # 关闭查询专用线程池 (取消未开始的排队查询)
+    from .concurrency import shutdown_query_executor
+    shutdown_query_executor()
     # 移除 SessionLogHandler, 避免重复注册
     logging.root.removeHandler(session_log_handler)
     logger.info("[api] 资源已释放")

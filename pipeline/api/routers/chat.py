@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from ..concurrency import query_timeout_s, run_query_with_timeout
 from ..deps import get_pipeline, get_session_store, verify_api_key
 from ..models import ChatRequest, ChatResponse
 from ..session_logger import clear_session_log_context, set_session_log_context
@@ -43,22 +44,33 @@ async def chat(
     # 设置日志上下文: 后续 pipeline 日志自动归入该 session
     set_session_log_context(session_id, req.query)
 
-    result, updated_session = await asyncio.to_thread(
-        pipe.chat,
-        query=req.query,
-        session=session,
-        mode=req.mode,
-        top_k=req.top_k,
-        stream=False,
-        use_agentic=req.use_agentic,
-        professional=req.professional,
-        collection=req.collection,
-    )
+    try:
+        result, updated_session = await run_query_with_timeout(
+            pipe.chat,
+            query=req.query,
+            session=session,
+            mode=req.mode,
+            top_k=req.top_k,
+            stream=False,
+            use_agentic=req.use_agentic,
+            professional=req.professional,
+            collection=req.collection,
+        )
+    except asyncio.TimeoutError:
+        # 超时不更新会话 (本轮视为失败), 返回明确错误。
+        return ChatResponse(
+            query=req.query,
+            session_id=session_id,
+            error=(
+                f"对话超时 (>{int(query_timeout_s())}s), 已中止返回。"
+                "请缩小问题范围或稍后重试。"
+            ),
+        )
+    finally:
+        clear_session_log_context()
 
     store.update(session_id, updated_session)
     store.append_messages(session_id, req.query, result.answer)
-
-    clear_session_log_context()
 
     return ChatResponse(
         query=result.query,
