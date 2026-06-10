@@ -542,11 +542,13 @@ class Pipeline:
 
     @contextmanager
     def _admin_milvus_client(self):
-        """临时 MilvusClient 上下文: 用完即 close(), 避免 gRPC 连接 fd 泄漏。
+        """管理类操作 (list/drop/flush/统计) 用的 MilvusClient 上下文。
 
-        管理类操作 (list/drop/flush/统计) 每次新建一个短连接; 不显式关闭会持续
-        占用文件描述符, 高频轮询 (前端列表/健康检查) 下很快耗尽 fd (EMFILE),
-        进而导致上传时 multipart 落临时文件失败 (400 parsing the body)。
+        重要: 这里**绝不** close()。pymilvus 按 (uri, db, auth) 确定性别名去重连接,
+        相同连接参数的所有 MilvusClient (含缓存的 MilvusIngester) 共享同一条 gRPC
+        连接; 一旦在此 close() 会 remove 这条共享连接, 导致正在灌入的 store 步骤
+        报 "should create connection first"。由于连接被复用, 重复创建不会泄漏 fd,
+        故无需也不能关闭。
         """
         from .clients.milvus import resolve_milvus_connection
         from pymilvus import MilvusClient
@@ -562,14 +564,7 @@ class Pipeline:
             kwargs["token"] = token
         if db_name:
             kwargs["db_name"] = db_name
-        client = MilvusClient(**kwargs)
-        try:
-            yield client
-        finally:
-            try:
-                client.close()
-            except Exception:
-                pass
+        yield MilvusClient(**kwargs)
 
     def list_collections(self, prefix: str = "kb_") -> List[Dict[str, Any]]:
         """列出 Milvus 中的集合, 可按前缀过滤。

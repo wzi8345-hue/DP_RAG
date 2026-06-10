@@ -54,6 +54,41 @@ class _SlidingWindowRateLimiter:
             _time_mod.sleep(min(max(wait, 0.05), self.period))
 
 
+# UniParser 解析限速必须**全局共享**: TaskStore 允许多个上传任务并发, 若每个任务
+# 各持一个限速器, 合计速率会叠加超过 UniParser 服务端 10/min 上限 → 429。
+# 这里用进程级单例, 所有上传任务共用同一个限速预算。
+_GLOBAL_LIMITER_LOCK = threading.Lock()
+_GLOBAL_UNIPARSER_LIMITER: Optional["_SlidingWindowRateLimiter"] = None
+_GLOBAL_UNIPARSER_RATE: int = 0
+
+
+def _get_global_uniparser_limiter(
+    rate_per_min: int,
+) -> Optional["_SlidingWindowRateLimiter"]:
+    """返回进程级共享的 UniParser 限速器 (rate<=0 表示不限速)。"""
+    global _GLOBAL_UNIPARSER_LIMITER, _GLOBAL_UNIPARSER_RATE
+    if rate_per_min <= 0:
+        return None
+    with _GLOBAL_LIMITER_LOCK:
+        if (
+            _GLOBAL_UNIPARSER_LIMITER is None
+            or _GLOBAL_UNIPARSER_RATE != rate_per_min
+        ):
+            _GLOBAL_UNIPARSER_LIMITER = _SlidingWindowRateLimiter(rate_per_min, 60.0)
+            _GLOBAL_UNIPARSER_RATE = rate_per_min
+        return _GLOBAL_UNIPARSER_LIMITER
+
+
+def _is_rate_limited(r: "IngestResult") -> bool:
+    """该篇是否因 UniParser 限流 (HTTP 429) 而失败 (可重试)。"""
+    for s in r.steps:
+        if not s.success and s.error:
+            msg = s.error.lower()
+            if "429" in msg or "rate limit" in msg:
+                return True
+    return False
+
+
 def _make_ingest_flow(pipe: Any, collection: str, backend: Optional[str]) -> IngestFlow:
     """为单篇上传构建独立 IngestFlow (独立 Config), 供多线程并发互不干扰。
 
@@ -284,13 +319,14 @@ def _ingest_upload(
         concurrency = 1
         rate_per_min = 0
     concurrency = max(1, min(concurrency, total))
-    limiter = (
-        _SlidingWindowRateLimiter(rate_per_min, 60.0) if rate_per_min > 0 else None
-    )
+    # 全局共享限速器: 跨所有并发上传任务统一限频, 避免叠加超 UniParser 10/min。
+    limiter = _get_global_uniparser_limiter(rate_per_min)
+    # 命中 429 时的重试上限 (等满一个限流窗口后再试), 超过则判失败。
+    max_rate_retries = 3 if limiter is not None else 0
     logger.info(
         f"[ingest-upload] 开始灌入 {total} 篇 (collection={collection}, "
         f"backend={effective_backend}, 并发={concurrency}, "
-        f"限速={rate_per_min or '无'}/min)"
+        f"限速={rate_per_min or '无'}/min, 全局共享)"
     )
 
     results: List[IngestResult] = [None] * total  # type: ignore[list-item]
@@ -298,15 +334,28 @@ def _ingest_upload(
     done_count = {"n": 0}
 
     def _work(idx: int, fp: str, doc_dir: str) -> None:
-        # 限速针对"启动解析"这一刻: 阻塞直到本分钟配额允许, 再开始整条灌入链。
-        if limiter is not None:
-            limiter.acquire()
-        try:
-            flow = _make_ingest_flow(pipe, collection, backend)
-            r = flow.run([fp], output_dir=doc_dir)
-        except Exception as e:
-            logger.warning(f"[ingest-upload] 灌入失败 {fp}: {e}")
-            r = IngestResult(file_paths=[fp], steps=[])
+        name = os.path.basename(fp)
+        attempt = 0
+        while True:
+            # 限速针对"启动解析"这一刻: 阻塞直到配额允许, 再开始整条灌入链。
+            if limiter is not None:
+                limiter.acquire()
+            try:
+                flow = _make_ingest_flow(pipe, collection, backend)
+                r = flow.run([fp], output_dir=doc_dir)
+            except Exception as e:
+                logger.warning(f"[ingest-upload] 灌入失败 {fp}: {e}")
+                r = IngestResult(file_paths=[fp], steps=[])
+            # 仅对 UniParser 429 限流做有限重试: 等满一个窗口再试, 不直接判失败。
+            if _is_rate_limited(r) and attempt < max_rate_retries:
+                attempt += 1
+                logger.warning(
+                    f"[ingest-upload] {name} 命中 UniParser 限流(429), "
+                    f"{60}s 后重试 (第 {attempt}/{max_rate_retries} 次)"
+                )
+                _time_mod.sleep(60.0)
+                continue
+            break
         results[idx] = r
         with progress_lock:
             done_count["n"] += 1
