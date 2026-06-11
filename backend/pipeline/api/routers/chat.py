@@ -25,8 +25,10 @@ router = APIRouter()
 
 
 def _ensure_collection_readable(collection: str | None, auth: AuthContext) -> None:
-    if not collection or not repo.available():
+    if not repo.available():
         return
+    if not collection:
+        raise HTTPException(status_code=400, detail="请选择一个可读文献库后再进行 RAG 检索")
     meta = repo.get_collection(collection)
     if meta is None:
         raise HTTPException(status_code=404, detail="知识库不存在或不可读")

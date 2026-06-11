@@ -103,7 +103,7 @@
 - ☐ #9.6 **API 约定迁移**：现有继承端点统一为 POST + APIResponse（动词式路径），同步更新前端 `api/client.ts`/类型与 `docs/后端协议文档.md`
 - ☐ #9.7 项目级 ruff `check --fix` + format 全量过一遍历史 pipeline 代码
 
-> 约定（强制，见 ARCHITECTURE §6.0）：业务接口统一 POST + `APIResponse{code,data,msg}`；SSE 与运维探针（GET /health、/stats）为例外。新增/重做端点（M4/M5）即按此实现。
+> 约定（强制，见 ARCHITECTURE §10.0）：业务接口统一 POST + `APIResponse{code,data,msg}`；SSE 与运维探针（GET /health、/stats）为例外。新增/重做端点（M4/M5）即按此实现。
 
 ### M8 · 部署 + CI
 - ☑ #8.1 `backend/Dockerfile`
@@ -128,8 +128,8 @@
 - 2026-06-08 · M3：后端 Logto JWT 本地校验（`pipeline/auth/`）+ `require_auth` 替换所有业务路由的 API Key 鉴权；CORS/root_path/AUTH_DISABLED 就绪。
 - 2026-06-08 · M4/M5/M7：数据模型（conversations/messages/kb_collections/documents/user_skills）与多检索源抽象（literature/enterprise_sql）脚手架落地；路由集成为下一阶段。
 - 2026-06-08 · M8：前后端 Dockerfile + `deploy/`（compose + .env.example）+ 三个 GitHub Actions（前后端镜像构建推送私有仓库、前端部署 Pages）。
-- 2026-06-08 · M9 基建/约定更新：后端切到 **uv + ruff**（`pyproject.toml` + `uv.lock`，删 requirements）；DB 改 **psycopg 3 + pydantic**（删 SQLAlchemy/Alembic），lifespan 自动建表；新增 **shell 全量备份/恢复**；新增 **APIResponse** 统一封装；确立「业务接口统一 POST + APIResponse」约定（见 ARCHITECTURE §6.0）。新代码 ruff 全过、后端 Dockerfile 改 uv。
-- 2026-06-09 · M9 基建：pipeline 基建连接支持**环境变量覆盖**（`config.py` 新增 `_ENV_OVERRIDES`，优先级 default<file<env<runtime），容器化部署无需挂载 YAML；compose 注入 `EMBEDDING_/MILVUS_/LLM_/RERANKER_/REFLECTION_/PARSER_*` 等变量，后端 Dockerfile 默认 `CONFIG_PATH=""`，`local_api_config.yaml` 标注为本机联调用。文档（ARCHITECTURE §10、.env.example）同步。
+- 2026-06-08 · M9 基建/约定更新：后端切到 **uv + ruff**（`pyproject.toml` + `uv.lock`，删 requirements）；DB 改 **psycopg 3 + pydantic**（删 SQLAlchemy/Alembic），lifespan 自动建表；新增 **shell 全量备份/恢复**；新增 **APIResponse** 统一封装；确立「业务接口统一 POST + APIResponse」约定（见 ARCHITECTURE §10.0）。新代码 ruff 全过、后端 Dockerfile 改 uv。
+- 2026-06-09 · M9 基建：pipeline 基建连接支持**环境变量覆盖**（`config.py` 新增 `_ENV_OVERRIDES`，优先级 default<file<env<runtime），容器化部署无需挂载 YAML；compose 注入 `EMBEDDING_/MILVUS_/LLM_/RERANKER_/REFLECTION_/PARSER_*` 等变量，后端 Dockerfile 默认 `CONFIG_PATH=""`，`local_api_config.yaml` 标注为本机联调用。文档（ARCHITECTURE §14、.env.example）同步。
 - 2026-06-09 · UI 十五轮（Popover 暗色对比 + 英文溢出）：新增 `--popover-bg` / `--popover-border`，暗色浮层背景提升到独立层级并增强 `shadow-pop`；Naive `popoverColor` 同步使用浮层色。账号菜单一级项改为固定 grid 列（icon / label / value / chevron），英文长 label/value 使用省略号；二级菜单选项 label 同样使用固定列与省略号，避免英文状态下文本重叠。UI_STYLE 同步。typecheck/build/lint 全绿。
 - 2026-06-09 · UI 十四轮（账号邮箱优先）：Logto 前端默认 scopes 从仅 `all:data` 调整为 `all:data,email,profile`，CI/Pages 构建环境同步，确保 `fetchUserInfo()` 可返回邮箱资料；账号菜单与设置页账号展示不再使用 `sub` 兜底，避免直接暴露 Logto user_id。ARCHITECTURE 同步。typecheck/build/lint 全绿。
 - 2026-06-09 · UI 十三轮（账号菜单二级偏好菜单）：`UserMenuPopover` 中语言偏好/主题偏好不再直接内联展示分段按钮，改为一级菜单项 + 右侧二级 `NPopover`；二级菜单选项左侧固定预留 check icon 列，当前选中项显示勾号，未选项留空，保证 label 对齐。UI_STYLE 同步。typecheck/build/lint 全绿。

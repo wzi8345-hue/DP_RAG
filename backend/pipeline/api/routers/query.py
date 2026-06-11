@@ -38,7 +38,9 @@ async def query(
 ) -> QueryResponse:
     """单次查询: retrieve → generate, 返回完整结果。"""
     pipe = get_pipeline()
-    if req.collection and repo.available():
+    if repo.available():
+        if not req.collection:
+            raise HTTPException(status_code=400, detail="请选择一个可读文献库后再进行 RAG 检索")
         meta = repo.get_collection(req.collection)
         if meta is None:
             raise HTTPException(status_code=404, detail="知识库不存在或不可读")

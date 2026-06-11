@@ -112,13 +112,43 @@ DP_RAG/
 - 列表接口返回 `private(mine) ∪ org(my_org) ∪ public`，并标注 `mine: bool` 与 `visibility`。
 - 对话分享链接与 `visibility` 解耦：`conversation_shares` 记录不透明 token；撤销后 token 失效。其他用户通过分享继续对话时，后端复制当前主线为自己的私有对话（`forked_from` 仅审计），后续新轮次只使用新 owner 可读的文献库与 skill。
 
+### 3.5 RAG 检索权限链路
+
+Milvus 不保存用户权限，也不做 `owner/org/public` 判断。权限判断统一在 Postgres/repo 层完成，检索链路必须满足：
+
+1. 前端从 `/collections` 只拿到当前用户可读的 collection：`private(mine) ∪ org(my_org) ∪ public`。
+2. 发起 RAG 问答时必须显式携带 `collection`。后端在 `/chat/append` 与 `/query` 中先查 `kb_collections` 并执行 `require_read(auth, collection)`；未传 collection 时直接拒绝，避免回退默认 Milvus 集合导致越权检索。
+3. 通过校验后，后端才把该 collection 名传给 `QueryFlow` / Milvus retriever。Milvus 只在这个已授权 collection 内召回 chunk。
+4. professional mode 的自定义 skill 也先从 `user_skills` 计算当前用户可读 `allowed_ids`，注入 `professional.skills.allowed_ids`，避免共享/复制对话继续使用原 owner 私有 skill。
+5. copy-on-continue 后新对话 owner 变为当前用户，后续新轮次重新按当前用户 `AuthContext` 计算 collection/skill 可见范围，不继承源对话 owner 的资源权限。
+
+```mermaid
+flowchart LR
+  userReq["Chat request with collection"] --> authCheck["Logto AuthContext"]
+  authCheck --> pgCheck["Postgres kb_collections can_read"]
+  pgCheck -->|"allowed"| milvusSearch["Milvus search in selected collection"]
+  pgCheck -->|"denied"| reject["403/404 reject"]
+  milvusSearch --> answer["LLM context + answer"]
+```
+
 ---
 
-## 4. 数据模型（Postgres）
+## 4. 存储边界总览
+
+| 存储 | 权威职责 | 保存内容 | 不保存/不负责 |
+|------|----------|----------|---------------|
+| Postgres | 业务权威状态、权限、任务状态、事件回放索引 | 用户/组织归属、visibility、conversations/messages、generation_runs/message_events、kb_collections/documents、ingest_tasks/items/events、user_skills、conversation_shares | 向量索引、大体积 PDF/解析产物、低延迟临时 fanout |
+| Milvus | 文献 chunk 向量与检索索引 | 每个 Milvus collection 内的 chunk rows：dense/sparse 向量、content、context、doc_id/doc_name、chunk_id、type、section、page_start、paragraph_index、publication_year、related_assets 等 | 用户权限、conversation、task 状态、PDF 原文、完整解析产物 |
+| Redis | 运行时队列与低延迟事件分发 | generation run queue、generation run stream、ingest task queue、ingest task stream，短 TTL 事件副本 | 权威任务状态、长期消息内容、权限判断 |
+| RustFS/S3 | 大文件与可重建 artifacts | 原始 PDF、解析 JSON、向量/meta sidecar、run artifacts（如专家模式完整大上下文） | 权限判断、向量搜索、任务状态 |
+
+---
+
+## 5. 数据模型（Postgres）
 
 **不使用 ORM / 迁移框架**：直接用 **psycopg 3**（连接池 + `dict_row`）以灵活使用 Postgres 高级查询；用 **pydantic** 定义数据结构（`pipeline/db/models.py`），取回的 dict 行 `model_validate` 即可。表结构（`pipeline/db/schema.py` 的幂等 DDL）在 **FastAPI lifespan 启动时自动检查/初始化**。备份与迁移走 **shell 全量备份**（`deploy/backup.sh` / `restore.sh`，`pg_dump | gzip`）。核心表：
 
-### 4.1 conversations / messages（消息树）
+### 5.1 conversations / messages（消息树）
 
 对话以**消息树**记录多轮：每条 message 记录其 `parent_id`（上一轮）。修改历史对话重新生成时，从被改消息处**分叉**出新分支。`conversations.active_leaf_message_id` 指向当前主线叶子；**加载主线**：从 active leaf 沿 `parent_id` 递归到根，再反转。
 
@@ -165,7 +195,7 @@ def mainline(conv):
 
 分叉：编辑某条 user 消息 → 以其 `parent_id` 为父新建 user 消息（兄弟分支）→ 生成 assistant 子消息 → 更新 `active_leaf_message_id` 指向新 assistant。旧分支保留，可切换。
 
-### 4.2 generation_runs / message_events（生产级生成运行）
+### 5.2 generation_runs / message_events（生产级生成运行）
 
 FastAPI Web 不直接执行模型生成；Web 创建 run 并入 Redis 队列，独立 `backend-worker` 消费 run。Postgres 保存 run 状态与可回放事件，Redis Streams 只负责低延迟 fanout。
 
@@ -194,7 +224,7 @@ message_events
   unique(run_id, seq)
 ```
 
-### 4.3 kb_collections（文献库归属）
+### 5.3 kb_collections（文献库归属）
 
 Milvus 集合 + 本地工作目录仍是物理存储；本表记录归属与可见性元数据。
 
@@ -210,7 +240,7 @@ kb_collections
 
 > 物理隔离策略：集合名加 owner 维度（`kb_<ownerhash>_<slug>`），保证不同用户同名库不冲突；上传/检索时强制带 owner 校验。本地工作目录 `UPLOAD_DIR/<owner_id>/kb_xxx/`。
 
-### 4.4 documents（文献条目，文献管理页）
+### 5.4 documents（文献条目，文献管理页）
 
 ```text
 documents
@@ -230,7 +260,7 @@ documents
   created_at / updated_at
 ```
 
-### 4.5 ingest_tasks / ingest_task_items / ingest_task_events（解析入库任务）
+### 5.5 ingest_tasks / ingest_task_items / ingest_task_events（解析入库任务）
 
 解析/入库与对话生成一样采用 Web/Worker 分离：FastAPI Web 只保存上传文件、写 task/items、入 Redis 队列；独立 `ingest-worker` 慢慢执行 parse → chunk → embed → Milvus store，并把进度事件写入 Postgres + Redis Stream。
 
@@ -269,7 +299,7 @@ ingest_task_events
   unique(task_id, seq)
 ```
 
-### 4.6 user_skills（自定义 skill 归属）
+### 5.6 user_skills（自定义 skill 归属）
 
 skill 物理文件仍存 `upload_dir/<owner_id>/`；本表记录归属与可见性，列表合并：内置（只读）∪ 我的 ∪ org-public。
 
@@ -285,7 +315,7 @@ user_skills
   (pk = owner_id + id)
 ```
 
-### 4.7 conversation_shares（分享链接）
+### 5.7 conversation_shares（分享链接）
 
 ```text
 conversation_shares
@@ -298,7 +328,7 @@ conversation_shares
 
 分享链接只授予源对话的只读访问；撤销只让 token 失效，不影响已 copy-to-mine 的独立副本。
 
-### 4.8 对象存储（RustFS / S3 compatible）
+### 5.8 对象存储（RustFS / S3 compatible）
 
 新增 `backend/pipeline/clients/object_store.py`，通过 `boto3` 连接自建 RustFS（S3 path-style + v4 签名）。用途：
 
@@ -308,7 +338,101 @@ conversation_shares
 
 ---
 
-## 5. 多检索源抽象（预留 SQL 接入）
+## 6. Milvus 数据模型
+
+Milvus 只存“可检索的文献 chunk 数据”，不存用户权限、不存对话、不存任务状态。权限由 Postgres 的 `kb_collections/documents` 控制；后端只有在 collection 通过 `can_read` 后才会访问对应 Milvus collection。
+
+每个文献库对应一个 Milvus collection（例如 `kb_xxx`）。chunk row 主要字段：
+
+```text
+pk                 varchar       -- Milvus 主键，通常由 doc_id/chunk_id 派生
+doc_id             varchar       -- 文献内部 id，通常是 PDF 文件名 stem
+doc_name           varchar       -- 文献标题/显示名
+chunk_id           varchar       -- chunk id
+type               varchar       -- title | summary | text | table | image | equation | references
+section            varchar       -- 章节/小节名
+content            varchar       -- 检索命中的正文/表格/图注/公式文本，截断上限见 MAX_LEN_CONTENT
+context            varchar       -- 额外上下文，截断上限见 MAX_LEN_CONTEXT
+embedding_text     varchar       -- 向量化文本
+dense_embedding    float_vector  -- dense embedding
+sparse_embedding   sparse_vector -- BM25 Function 生成的 sparse 向量
+page_start         int
+paragraph_index    int
+publication_year   int
+related_assets     json/string   -- 图表/公式/正文互相关联信息
+```
+
+使用方式：
+
+- 入库：`knowledge_blocks_vec.json` → `MilvusIngester.ingest_file()` → upsert rows。
+- 检索：`QueryFlow` 根据授权后的 `collection` 创建 retriever，只在这个 collection 内召回。
+- 展示引用：前端拿 `hits` 中的 `doc_id/page_start/chunk_id/content` 渲染引用与来源；PDF 原文不来自 Milvus，而来自 RustFS 预签名 URL。
+
+---
+
+## 7. Redis 数据模型
+
+Redis 是运行时协调层，不是权威数据源。Redis 重启后，最终对话消息、任务状态、事件回放仍以 Postgres 为准。
+
+当前 key/stream 约定：
+
+```text
+REDIS_RUN_QUEUE
+  default: dprag:generation:runs
+  type: list
+  value: run_id
+  purpose: generation worker 通过 BLPOP 消费对话生成任务
+
+REDIS_RUN_STREAM_PREFIX:<run_id>
+  default prefix: dprag:generation:stream
+  type: stream
+  event field: JSON string
+  purpose: 对话生成 status/thinking/text/done/error 的低延迟 fanout
+
+REDIS_INGEST_QUEUE
+  default: dprag:ingest:tasks
+  type: list
+  value: task_id
+  purpose: ingest-worker 通过 BLPOP 消费解析入库任务
+
+REDIS_INGEST_STREAM_PREFIX:<task_id>
+  default prefix: dprag:ingest:stream
+  type: stream
+  event field: JSON string
+  purpose: 解析入库 status/progress/item/done/failed/cancelled 的低延迟 fanout
+```
+
+Redis Stream 只保留短期窗口（`REDIS_*_STREAM_MAXLEN` + `REDIS_*_STREAM_TTL`）。SSE 端点必须先从 Postgres 事件表按 `seq` 回放，再 tail Redis Stream。
+
+---
+
+## 8. RustFS / S3 对象布局
+
+RustFS 存大文件与可重建 artifacts，不做权限判断。所有读取都必须先走后端权限校验，再返回短期预签名 URL。
+
+当前 key 规范：
+
+```text
+<collection>/<doc_id>/source.pdf
+  原始 PDF，引用原文 tab 使用
+
+<collection>/<doc_id>/knowledge_blocks.json
+<collection>/<doc_id>/knowledge_blocks_vec.json
+<collection>/<doc_id>/knowledge_blocks_meta.json
+<collection>/<doc_id>/uniparser_result.json
+<collection>/<doc_id>/uniparser_meta.json
+...
+  解析、分块、向量、meta 产物，用于 rebuild/re-ingest
+
+runs/<owner_id>/<run_id>/...
+  高级专家模式大体积 run artifacts 预留，如完整 synthesis context、每轮检索结果等
+```
+
+对象存储 key 会在 Postgres 中以 `documents.pdf_object_key`、`documents.artifact_prefix`、`ingest_task_items.pdf_object_key`、`ingest_task_items.artifact_prefix` 等字段建立索引关系。
+
+---
+
+## 9. 多检索源抽象（预留 SQL 接入）
 
 `backend/pipeline/retrieval_sources/`：
 
@@ -326,9 +450,9 @@ class RetrievalSource(Protocol):
 
 ---
 
-## 6. API 概览（/api/v1，统一 JWT 鉴权）
+## 10. API 概览（/api/v1，统一 JWT 鉴权）
 
-### 6.0 API 约定（强制）
+### 10.0 API 约定（强制）
 
 - **业务接口统一用 `POST`**，参数走 JSON body（或 multipart 上传）；路径不再用 path-param 的 REST 风格，改为动词式路径（如 `/collections/list`、`/collections/delete`），body 携带 `name`/`id` 等。
 - **非 SSE 接口统一封装** `APIResponse`（`pipeline/api/models.py`）：
@@ -345,7 +469,7 @@ class RetrievalSource(Protocol):
 
 > 落地策略：新增/重做的多用户端点（M4/M5）一律按本约定（POST + APIResponse）实现；现有继承端点的统一迁移见 DEV_PLAN「API 约定迁移」任务（需同步更新前端 client 与 `docs/后端协议文档.md`）。
 
-### 6.1 端点（POST + APIResponse，除标注外）
+### 10.1 端点（POST + APIResponse，除标注外）
 
 | 分组 | 端点 | 说明 | 变化 |
 |------|------|------|------|
@@ -365,11 +489,11 @@ class RetrievalSource(Protocol):
 | 技能 | `GET /skills` `POST /skills` `DELETE /skills/{id}` `PATCH /skills/{id}/visibility` `POST /skills/copy-to-mine` `/skills/template` | skill CRUD + 可见性 + 复制到个人（M9.6 统一 POST） | 改造 |
 | 运维 | `GET /health` `GET /stats`；`POST /doc_summary` | 健康/统计免认证（GET）；doc_summary 业务接口（POST） | 保留/改造 |
 
-### 6.1 SSE 事件协议（保持兼容并扩展）
+### 10.2 SSE 事件协议（保持兼容并扩展）
 
 事件 `type`：`status` | `thinking` | `text` | `done` | `error`。run-based SSE 事件带 `run_id` 与递增 `seq`；前端断线后可带最后 `seq` 重连，服务端先从 `message_events` 回放，再 tail Redis Stream。
 
-### 6.2 「前端断连后台不停止」与「正在生成不可发起新对话」
+### 10.3 「前端断连后台不停止」与「正在生成不可发起新对话」
 
 - 对话生成在独立 `backend-worker` 服务中执行，Web 进程只负责入队与 SSE fanout。Worker 将增量写入 `message_events` 并发布到 Redis Stream，同时更新 `messages.content/status`。
 - 文献解析/入库在独立 `ingest-worker` 服务中执行，Web 进程只保存上传文件并创建任务；worker 逐文件处理并写入 `ingest_task_events`。
@@ -378,17 +502,17 @@ class RetrievalSource(Protocol):
 
 ---
 
-## 7. 前端架构
+## 11. 前端架构
 
-### 7.1 技术栈
+### 11.1 技术栈
 
 Vue 3 · `<script setup>` · TypeScript · Vite 8 · pnpm · UnoCSS（含 presetIcons，icon-in-css）· Vitest · Oxlint · VueUse · vue-i18n · `@logto/vue` · markstream-vue。
 
-### 7.2 UI 风格
+### 11.2 UI 风格
 
 完整规范见根目录 **[`UI_STYLE.md`](./UI_STYLE.md)**（源真相）。要点：类 Vercel 控制台、低噪音平铺；**按钮无 border/无 shadow**（主功能纯色主题色填充 `btn-primary`，次要用主题色透明填充 `btn-secondary`）；**优先分割线**而非卡片套卡片；圆角 6–8px；主标题深色 `text-base`、次要描述 `text-muted`；light/dark/system + 自定义主题色（CSS 变量 token，`--accent-soft` 随主题色派生）；滚动条细、`scrollbar-gutter: stable` 不抖动；布局用 flex/grid + 局部 overflow。图标用 presetIcons；不明显的 icon/button 提供 title/tooltip。
 
-### 7.3 路由与页面
+### 11.3 路由与页面
 
 - `/` → 重定向到 `/chat`
 - `/chat`（含历史对话侧栏、消息树主线、分叉切换）
@@ -397,14 +521,14 @@ Vue 3 · `<script setup>` · TypeScript · Vite 8 · pnpm · UnoCSS（含 preset
 - `/settings`（主题、语言、检索源开关、默认检索参数、账号/登出）
 - `/callback`（Logto 回调）
 
-### 7.4 关键 composables
+### 11.4 关键 composables
 
 - `useAuthFetch`：注入 access_token 的 fetch。
 - `useChatStream`：fetch + ReadableStream 解析 SSE；支持 abort（仅断前端连接）、reconnect（重连续读）。
 - `useTheme`：light/dark/system + 主题色 token。
 - `useRetrievalSources`：检索源开关与能力探测。
 
-### 7.5 问答页交互要点
+### 11.5 问答页交互要点
 
 - 选择文献库中的单篇文献（`doc_ids`）或整库；支持上传文献（上传后自动进入文献库管理）。
 - 开关：是否启用文献库检索、专家模式、Agentic、流式、检索源。
@@ -414,7 +538,7 @@ Vue 3 · `<script setup>` · TypeScript · Vite 8 · pnpm · UnoCSS（含 preset
 
 ---
 
-## 8. 部署拓扑
+## 12. 部署拓扑
 
 ```text
 浏览器 ──HTTPS──> rag.hal9k.one (GitHub Pages, 前端静态)
@@ -437,7 +561,7 @@ Logto: auth.dplink.cc (OIDC + JWKS)
 
 ---
 
-## 9. CI/CD
+## 13. CI/CD
 
 GitHub Actions：
 
@@ -448,7 +572,7 @@ GitHub Actions：
 
 ---
 
-## 10. 配置与环境变量
+## 14. 配置与环境变量
 
 见 [`deploy/.env.example`](./deploy/.env.example)。要点：
 
@@ -468,7 +592,7 @@ GitHub Actions：
 
 ---
 
-## 11. 关键决策记录（ADR 摘要）
+## 15. 关键决策记录（ADR 摘要）
 
 | # | 决策 | 理由 |
 |---|------|------|
