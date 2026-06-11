@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import time
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 
 from ..authz import require_write
 from ..deps import AuthContext, get_pipeline, get_task_store, require_auth
-from ..models import IngestRequest, ParseRequest, LoadVecRequest, TaskResponse
+from ..models import (
+    IngestRequest,
+    IngestTaskItemResponse,
+    IngestTaskResponse,
+    ParseRequest,
+    LoadVecRequest,
+    TaskResponse,
+)
 from ...clients import object_store
+from ...clients import redis as redis_runtime
 from ...db import repo
 from ...flows.ingest import IngestResult
 from .collections import (
@@ -25,6 +36,57 @@ from .collections import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# 单请求上传硬上限: 防止一次 multipart 塞太多文件撑爆内存/文件描述符/body 解析。
+_UPLOAD_MAX_FILES = int(os.environ.get("UPLOAD_MAX_FILES", "200"))
+_UPLOAD_MAX_TOTAL_MB = int(os.environ.get("UPLOAD_MAX_TOTAL_MB", "500"))
+
+
+def _ingest_task_payload(task_id: str) -> IngestTaskResponse:
+    task = repo.get_ingest_task(task_id) if repo.available() else None
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    items = repo.list_ingest_task_items(task_id)
+    return IngestTaskResponse(
+        id=task.id,
+        collection_name=task.collection_name,
+        status=task.status,
+        progress=round(task.progress or 0, 4),
+        total_items=task.total_items,
+        completed_items=task.completed_items,
+        failed_items=task.failed_items,
+        skipped_items=task.skipped_items,
+        cancel_requested=task.cancel_requested,
+        result=task.result,
+        error=task.error,
+        created_at=task.created_at.timestamp() if task.created_at else 0.0,
+        items=[
+            IngestTaskItemResponse(
+                id=i.id,
+                doc_id=i.doc_id,
+                filename=i.filename,
+                status=i.status,
+                error=i.error,
+                chunk_count=i.chunk_count,
+            )
+            for i in items
+        ],
+    )
+
+
+def _ingest_event_payload(ev) -> dict:
+    payload = dict(ev.payload or {})
+    payload.setdefault("type", ev.type)
+    payload["seq"] = ev.seq
+    payload["task_id"] = ev.task_id
+    return payload
+
+
+def _append_and_publish_ingest_event(task_id: str, event_type: str, payload: dict) -> None:
+    ev = repo.append_ingest_task_event(task_id, event_type, payload)
+    live = _ingest_event_payload(ev)
+    if redis_runtime.configured():
+        redis_runtime.get_redis_runtime().publish_ingest_event(task_id, live)
 
 
 def _ingest_rebuild(task_id: str, directory: str) -> Dict[str, Any]:
@@ -115,7 +177,7 @@ def ingest_rebuild(
     task_store = get_task_store()
     tid = uuid.uuid4().hex[:16]
     task_store.submit(_ingest_rebuild, tid, req.directory, task_id=tid)
-    return TaskResponse(id=tid, status="pending", created_at=_time.time())
+    return TaskResponse(id=tid, status="queued", created_at=_time.time())
 
 
 @router.post("/ingest/append", response_model=TaskResponse)
@@ -171,6 +233,17 @@ def get_task(
     _auth: str = Depends(require_auth),
 ) -> TaskResponse:
     """查询异步任务状态。"""
+    if repo.available():
+        task = repo.get_ingest_task(task_id)
+        if task is not None:
+            return TaskResponse(
+                id=task.id,
+                status=task.status,
+                progress=round(task.progress or 0, 4),
+                result=task.result,
+                error=task.error,
+                created_at=task.created_at.timestamp() if task.created_at else 0.0,
+            )
     task_store = get_task_store()
     status = task_store.get(task_id)
     if status is None:
@@ -183,6 +256,96 @@ def get_task(
         result=status.result,
         error=status.error,
         created_at=status.created_at,
+    )
+
+
+@router.get("/ingest/tasks/{task_id}", response_model=IngestTaskResponse)
+def get_ingest_task(
+    task_id: str,
+    auth: AuthContext = Depends(require_auth),
+) -> IngestTaskResponse:
+    task = repo.get_ingest_task(task_id) if repo.available() else None
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.owner_id != auth.user_id:
+        raise HTTPException(status_code=403, detail="No permission for task")
+    return _ingest_task_payload(task_id)
+
+
+@router.post("/ingest/tasks/{task_id}/cancel", response_model=IngestTaskResponse)
+def cancel_ingest_task(
+    task_id: str,
+    auth: AuthContext = Depends(require_auth),
+) -> IngestTaskResponse:
+    task = repo.get_ingest_task(task_id) if repo.available() else None
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.owner_id != auth.user_id:
+        raise HTTPException(status_code=403, detail="No permission for task")
+    repo.request_ingest_task_cancel(task_id)
+    _append_and_publish_ingest_event(
+        task_id,
+        "status",
+        {"type": "status", "status": "cancelling", "task_id": task_id},
+    )
+    return _ingest_task_payload(task_id)
+
+
+@router.get("/ingest/tasks/{task_id}/stream")
+def stream_ingest_task(
+    task_id: str,
+    after_seq: int = 0,
+    auth: AuthContext = Depends(require_auth),
+) -> StreamingResponse:
+    task = repo.get_ingest_task(task_id) if repo.available() else None
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.owner_id != auth.user_id:
+        raise HTTPException(status_code=403, detail="No permission for task")
+
+    def event_generator():
+        last_seq = max(0, int(after_seq or 0))
+        last_redis_id = "$"
+        terminal_types = {"done", "failed", "cancelled", "error"}
+        try:
+            while True:
+                replayed = repo.list_ingest_task_events(task_id, after_seq=last_seq, limit=500)
+                for ev in replayed:
+                    payload = _ingest_event_payload(ev)
+                    last_seq = max(last_seq, ev.seq)
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                    if payload.get("type") in terminal_types:
+                        return
+
+                current = repo.get_ingest_task(task_id)
+                if current and current.status in {"done", "failed", "cancelled"}:
+                    return
+
+                if redis_runtime.configured():
+                    for redis_id, payload in redis_runtime.get_redis_runtime().read_ingest_events(
+                        task_id,
+                        last_id=last_redis_id,
+                        block_ms=1000,
+                        count=100,
+                    ):
+                        last_redis_id = redis_id
+                        seq = int(payload.get("seq") or 0)
+                        if seq <= last_seq:
+                            continue
+                        last_seq = seq
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                        if payload.get("type") in terminal_types:
+                            return
+                else:
+                    time.sleep(1)
+        except Exception as e:
+            logger.exception("[ingest/tasks/stream] 生成器异常")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -298,6 +461,30 @@ async def ingest_upload(
     import uuid
     import time as _time
 
+    if not repo.available():
+        raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    if not redis_runtime.configured():
+        raise HTTPException(status_code=503, detail="REDIS_URL 未配置")
+
+    if len(files) > _UPLOAD_MAX_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"单次最多上传 {_UPLOAD_MAX_FILES} 个文件 (本次 {len(files)} 个); "
+                "请分批上传。"
+            ),
+        )
+    total_bytes = sum(int(getattr(f, "size", 0) or 0) for f in files)
+    max_total_bytes = _UPLOAD_MAX_TOTAL_MB * 1024 * 1024
+    if total_bytes > max_total_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"单次上传总大小 {total_bytes / 1024 / 1024:.0f}MB 超过上限 "
+                f"{_UPLOAD_MAX_TOTAL_MB}MB; 请分批上传或减少单批文件数。"
+            ),
+        )
+
     # 与新建保持一致: 支持中文名 (解析为 ASCII slug); 已是 kb_ 名时幂等
     safe_collection = make_collection_slug(collection)
     kb_dir = kb_workspace_dir(safe_collection)
@@ -378,10 +565,47 @@ async def ingest_upload(
             f"{skipped_existing}"
         )
 
-    task_store = get_task_store()
     tid = uuid.uuid4().hex[:16]
-    task_store.submit(
-        _ingest_upload, tid, items, safe_collection, backend, skipped_existing,
+    stream_key = redis_runtime.get_redis_runtime().ingest_stream_key(tid)
+    repo.create_ingest_task(
         task_id=tid,
+        auth=auth,
+        collection_name=safe_collection,
+        kind="upload",
+        total_items=len(items),
+        params={"backend": backend, "skipped_existing": skipped_existing},
+        redis_stream=stream_key,
     )
+    for save_path, doc_dir, doc_stem, filename, owner_id, pdf_key, artifact_prefix in items:
+        repo.add_ingest_task_item(
+            item_id=f"{tid}:{doc_stem}",
+            task_id=tid,
+            collection_name=safe_collection,
+            owner_id=owner_id,
+            doc_id=doc_stem,
+            filename=filename,
+            pdf_path=save_path,
+            doc_dir=doc_dir,
+            pdf_object_key=pdf_key,
+            artifact_prefix=artifact_prefix,
+        )
+    for idx, skipped in enumerate(skipped_existing, 1):
+        skipped_doc_id = sanitized_doc_stem(skipped)
+        repo.add_ingest_task_item(
+            item_id=f"{tid}:skip:{idx}:{skipped_doc_id}",
+            task_id=tid,
+            collection_name=safe_collection,
+            owner_id=auth.user_id,
+            doc_id=skipped_doc_id,
+            filename=skipped,
+            status="skipped",
+            error="already ingested",
+        )
+    repo.update_ingest_task_counts(tid)
+    _append_and_publish_ingest_event(
+        tid,
+        "status",
+        {"type": "status", "status": "queued", "task_id": tid},
+    )
+    redis_runtime.get_redis_runtime().enqueue_ingest_task(tid)
     return TaskResponse(id=tid, status="pending", created_at=_time.time())

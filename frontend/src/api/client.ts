@@ -9,6 +9,8 @@ import type {
   DocSummaryResponse,
   DocumentInfo,
   HealthResponse,
+  IngestTask,
+  IngestTaskEvent,
   PdfUrlResponse,
   ResourceCopyResponse,
   RunStatusResponse,
@@ -189,6 +191,43 @@ export class ApiClient {
   async getTask(id: string): Promise<TaskResponse> {
     return handle(
       await fetch(this.url(`/tasks/${id}`), { headers: await this.headers(false) }),
+    )
+  }
+
+  async getIngestTask(id: string): Promise<IngestTask> {
+    return handle(
+      await fetch(this.url(`/ingest/tasks/${encodeURIComponent(id)}`), {
+        headers: await this.headers(false),
+      }),
+    )
+  }
+
+  async streamIngestTask(
+    id: string,
+    onEvent: (ev: IngestTaskEvent) => void,
+    signal?: AbortSignal,
+    afterSeq = 0,
+  ): Promise<void> {
+    const res = await fetch(
+      this.url(`/ingest/tasks/${encodeURIComponent(id)}/stream?after_seq=${encodeURIComponent(afterSeq)}`),
+      {
+        headers: await this.headers(false),
+        signal,
+      },
+    )
+    if (!res.ok || !res.body) {
+      await handle(res)
+      return
+    }
+    await consumeSSE(res, onEvent as (ev: StreamEvent) => void)
+  }
+
+  async cancelIngestTask(id: string): Promise<IngestTask> {
+    return handle(
+      await fetch(this.url(`/ingest/tasks/${encodeURIComponent(id)}/cancel`), {
+        method: 'POST',
+        headers: await this.headers(false),
+      }),
     )
   }
 

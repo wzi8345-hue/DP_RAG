@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { NButton, NDataTable, NInput, type DataTableColumns } from 'naive-ui'
 import { useApi } from '@/composables/useApi'
 import WorkspaceSplit from '@/components/WorkspaceSplit.vue'
-import type { CollectionInfo, DocumentInfo, TaskResponse } from '@/api/types'
+import type { CollectionInfo, DocumentInfo, IngestTask, TaskResponse } from '@/api/types'
 
 const { t } = useI18n()
 const api = useApi()
@@ -21,6 +21,8 @@ const newName = ref('')
 const uploading = ref(false)
 const uploadProgress = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
+const currentIngestTask = ref<IngestTask | null>(null)
+let ingestAbort: AbortController | null = null
 
 const selectedInfo = computed(() => collections.value.find((c) => c.name === selected.value) || null)
 const canWriteSelected = computed(() => selectedInfo.value?.mine !== false)
@@ -136,13 +138,71 @@ async function pollTask(task: TaskResponse, label: string): Promise<void> {
   uploadProgress.value = cur.status === 'failed' ? `${label}失败` : ''
 }
 
+function isIngestDone(status?: string): boolean {
+  return status === 'done' || status === 'failed' || status === 'cancelled'
+}
+
+function updateIngestProgress(task: IngestTask, label: string) {
+  currentIngestTask.value = task
+  const pct = Math.round((task.progress || 0) * 100)
+  const failed = task.failed_items ? `，失败 ${task.failed_items}` : ''
+  const skipped = task.skipped_items ? `，跳过 ${task.skipped_items}` : ''
+  uploadProgress.value = `${label} ${pct}% (${task.completed_items}/${task.total_items}${failed}${skipped})`
+  if (task.status === 'failed') uploadProgress.value = `${label}失败：${task.error || '请查看失败项'}`
+  if (task.status === 'cancelled') uploadProgress.value = `${label}已取消`
+  if (task.status === 'done') uploadProgress.value = ''
+}
+
+async function refreshIngestTask(taskId: string, label: string): Promise<IngestTask | null> {
+  try {
+    const task = await api.getIngestTask(taskId)
+    updateIngestProgress(task, label)
+    return task
+  } catch {
+    return null
+  }
+}
+
+async function waitIngestTask(taskId: string, label: string): Promise<void> {
+  ingestAbort?.abort()
+  ingestAbort = new AbortController()
+  await refreshIngestTask(taskId, label)
+  try {
+    await api.streamIngestTask(
+      taskId,
+      async () => {
+        await refreshIngestTask(taskId, label)
+      },
+      ingestAbort.signal,
+    )
+  } catch {
+    const fallback = await api.getTask(taskId)
+    await pollTask(fallback, label)
+  } finally {
+    const finalTask = await refreshIngestTask(taskId, label)
+    if (finalTask && isIngestDone(finalTask.status)) ingestAbort = null
+  }
+}
+
+async function cancelIngest() {
+  const task = currentIngestTask.value
+  if (!task || isIngestDone(task.status)) return
+  try {
+    const cancelled = await api.cancelIngestTask(task.id)
+    ingestAbort?.abort()
+    updateIngestProgress(cancelled, t('library.parsing'))
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
 async function onFiles(e: Event) {
   const files = Array.from((e.target as HTMLInputElement).files ?? [])
   if (files.length === 0 || !selected.value) return
   uploading.value = true
   try {
     const task = await api.uploadAndIngest(files, selected.value)
-    await pollTask(task, t('library.parsing'))
+    await waitIngestTask(task.id, t('library.parsing'))
     await loadCollections()
     await loadDocs()
   } catch (err) {
@@ -336,11 +396,33 @@ const docColumns = computed<DataTableColumns<DocumentInfo>>(() => [
             </template>
             {{ t('library.uploadDocs') }}
           </NButton>
+          <NButton
+            v-if="currentIngestTask && !isIngestDone(currentIngestTask.status)"
+            type="warning"
+            size="small"
+            @click="cancelIngest"
+          >
+            {{ t('common.cancel') }}
+          </NButton>
           <input ref="fileInput" type="file" accept="application/pdf" multiple class="hidden" @change="onFiles" />
         </div>
       </header>
 
       <div class="min-h-0 flex-1 overflow-y-auto p-5">
+        <div
+          v-if="currentIngestTask?.items?.some((it) => it.status === 'failed' || it.status === 'skipped')"
+          class="mb-3 rounded-[8px] bg-surface-2 p-3 text-xs text-muted"
+        >
+          <div class="mb-1 font-medium text-base">解析任务明细</div>
+          <div
+            v-for="it in currentIngestTask.items.filter((row) => row.status === 'failed' || row.status === 'skipped')"
+            :key="it.id"
+            class="truncate"
+            :title="`${it.filename || it.doc_id}: ${it.error || it.status}`"
+          >
+            {{ it.filename || it.doc_id }} · {{ it.status }}<span v-if="it.error"> · {{ it.error }}</span>
+          </div>
+        </div>
         <div v-if="!selected" class="grid h-full place-items-center text-sm text-faint">
           {{ t('library.emptyCollections') }}
         </div>

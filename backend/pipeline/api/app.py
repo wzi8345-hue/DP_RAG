@@ -59,6 +59,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     task_store = TaskStore(
         max_workers=int(os.environ.get("TASK_MAX_WORKERS", "2")),
+        persist_dir=os.environ.get("TASK_DIR", "logs/tasks"),
     )
 
     # API Keys: 逗号分隔, 空则不鉴权

@@ -86,6 +86,7 @@
 - ☑ #6.2 `GET /runs/{run_id}/stream`：先回放 Postgres `message_events`，再 tail Redis Stream
 - ☑ #6.3 `POST /runs/{run_id}/stop` 取消标志，worker 协作式停止
 - ☑ #6.4 前端断连不取消后台；重连通过 `run_id + seq` 回放恢复
+- ☑ #6.5 解析/入库任务迁到 Redis ingest queue + 独立 `ingest-worker`，支持任务状态、事件回放与取消
 
 ### M7 · 多检索源
 - ◐ #7.1 `RetrievalSource` 协议 + `LiteratureSource`（`pipeline/retrieval_sources/` 已落地，待接入 QueryFlow）
@@ -110,6 +111,7 @@
 - ☑ #8.3 `deploy/docker-compose.yaml`（backend + postgres）+ `.env.example`
 - ☑ #8.6 RustFS/S3 compatible 对象存储服务与 env 配置（PDF 原文 + 解析产物 + 预签名 URL）
 - ☑ #8.7 Redis 服务 + 独立 `worker` compose 服务（同 backend 镜像，不暴露 HTTP）
+- ☑ #8.8 独立 `ingest-worker` compose 服务（同 backend 镜像，不暴露 HTTP）
 - ☑ #8.4 CI：变更检测（paths）+ 构建推送私有仓库镜像（DP_USERNAME/DP_PASSWORD）
 - ☑ #8.5 CI：前端变更构建并部署 GitHub Pages（CNAME rag.hal9k.one）
 
@@ -146,6 +148,7 @@
 - 2026-06-09 · 修复登录死循环（M1 #1.4）：`App.vue` 原先用 `@logto/vue` 的 `isLoading` 作为渲染门控；而 `isLoading` 在每次 `getAccessToken/fetchUserInfo` 时都会翻 true，导致 AppLayout 挂载→触发请求→isLoading=true→卸载→resolve 后重新挂载→再请求…的死循环，持续打后端。改为用 `isLoading` 锁存「首次鉴权完成」一次（`initialAuthChecked`），之后仅按 `isAuthenticated` 门控，AppLayout 不再被反复挂载/卸载。
 - 2026-06-09 · 引用跳转 + 对象存储 + 三级权限：新增 RustFS/S3 client（`boto3`）与 compose 服务/env；上传入库将 PDF 与解析产物写入对象存储并落 `documents.pdf_object_key/artifact_prefix`；新增 `POST /documents/pdf-url` 预签名 URL。前端引入 `@embedpdf/vue-pdf-viewer`，SourcesPanel 增「原文」tab，点击引用角标按 `hit.page_start` 跳页。完成 `Visibility=private|org|public`、`api/authz.py`、`db/repo.py`、collections/skills/conversations/chat/query 权限接线；新增分享链接、copy-on-continue、文献库/skill copy-to-mine 与前端 public→org→mine 分组。验证：frontend typecheck 通过；后端变更文件 `py_compile` 通过（全量 ruff 仍有历史 typing/ruff 债务，见 #9.7）。
 - 2026-06-10 · M6 生产级对话运行架构：新增 `generation_runs/message_events`（Postgres 权威存储 + 按 run_id/seq 回放），新增 Redis 依赖与 `pipeline/clients/redis.py`（run queue + Redis Streams），新增 `/chat/append`、`/runs/{run_id}/stream`、`/runs/{run_id}/status`、`/runs/{run_id}/stop`；新增独立 `pipeline.workers.generation` worker，从 Redis 消费 run、按 Postgres message parent chain 重建上下文、调用现有 `stream_chat_events`、双写 Postgres events 与 Redis Stream。前端 `useChat` 改为 append → subscribe run stream；compose 增 Redis 与独立 `worker` 服务。旧 `/chat` 与 `/chat/stream` 已降级为 410，避免继续走请求内生成链路。
+- 2026-06-11 · M6 解析入库队列化：新增 `ingest_tasks/ingest_task_items/ingest_task_events`（Postgres 权威任务状态 + 按 task_id/seq 回放），扩展 Redis runtime 增加独立 ingest queue/stream；`POST /ingest/upload` 改为 submit-only，新增 `/ingest/tasks/{id}`、`/ingest/tasks/{id}/stream`、`/ingest/tasks/{id}/cancel`；新增 `pipeline.workers.ingest` 独立 worker，逐文件执行 parse→chunk→embed→Milvus store、上传 artifacts、回填 documents 与 task item。前端 Library 上传状态改为后端 canonical task，支持取消与刷新恢复；compose 增 `ingest-worker` 服务。
 - 下一步：M9.6 现有端点统一迁移到 POST+APIResponse（含前端 client 与协议文档）→ M7 多源融合。
 
 ---

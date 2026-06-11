@@ -15,6 +15,11 @@ from .models import (
     ConversationShare,
     Document,
     GenerationRun,
+    IngestTask,
+    IngestTaskEvent,
+    IngestTaskItem,
+    IngestItemStatus,
+    IngestTaskStatus,
     KbCollection,
     Message,
     MessageEvent,
@@ -869,3 +874,310 @@ def get_share(token: str) -> ConversationShare | None:
             (token,),
         )
         return _model(ConversationShare, cur.fetchone())
+
+
+# ---------------------------------------------------------------------------
+# Ingest tasks / items / events
+# ---------------------------------------------------------------------------
+
+
+def create_ingest_task(
+    *,
+    task_id: str,
+    auth: AuthContext,
+    collection_name: str,
+    kind: str = "upload",
+    total_items: int = 0,
+    params: dict[str, Any] | None = None,
+    redis_stream: str | None = None,
+) -> IngestTask:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO ingest_tasks(
+              id, owner_id, org_id, collection_name, kind, status,
+              total_items, params, redis_stream, updated_at
+            )
+            VALUES (
+              %(id)s, %(owner_id)s, %(org_id)s, %(collection_name)s, %(kind)s,
+              'queued', %(total_items)s, %(params)s, %(redis_stream)s, now()
+            )
+            RETURNING *
+            """,
+            {
+                "id": task_id,
+                "owner_id": auth.user_id,
+                "org_id": auth.org_id,
+                "collection_name": collection_name,
+                "kind": kind,
+                "total_items": total_items,
+                "params": _json(params),
+                "redis_stream": redis_stream,
+            },
+        )
+        return IngestTask.model_validate(cur.fetchone())
+
+
+def add_ingest_task_item(
+    *,
+    item_id: str,
+    task_id: str,
+    collection_name: str,
+    owner_id: str,
+    doc_id: str,
+    filename: str | None = None,
+    pdf_path: str | None = None,
+    doc_dir: str | None = None,
+    pdf_object_key: str | None = None,
+    artifact_prefix: str | None = None,
+    status: IngestItemStatus = "pending",
+    error: str | None = None,
+) -> IngestTaskItem:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO ingest_task_items(
+              id, task_id, collection_name, owner_id, doc_id, filename,
+              pdf_path, doc_dir, pdf_object_key, artifact_prefix, status, error, updated_at
+            )
+            VALUES (
+              %(id)s, %(task_id)s, %(collection_name)s, %(owner_id)s, %(doc_id)s,
+              %(filename)s, %(pdf_path)s, %(doc_dir)s, %(pdf_object_key)s,
+              %(artifact_prefix)s, %(status)s, %(error)s, now()
+            )
+            RETURNING *
+            """,
+            {
+                "id": item_id,
+                "task_id": task_id,
+                "collection_name": collection_name,
+                "owner_id": owner_id,
+                "doc_id": doc_id,
+                "filename": filename,
+                "pdf_path": pdf_path,
+                "doc_dir": doc_dir,
+                "pdf_object_key": pdf_object_key,
+                "artifact_prefix": artifact_prefix,
+                "status": status,
+                "error": error,
+            },
+        )
+        return IngestTaskItem.model_validate(cur.fetchone())
+
+
+def get_ingest_task(task_id: str) -> IngestTask | None:
+    with base.cursor() as cur:
+        cur.execute("SELECT * FROM ingest_tasks WHERE id = %s", (task_id,))
+        return _model(IngestTask, cur.fetchone())
+
+
+def list_ingest_task_items(task_id: str) -> list[IngestTaskItem]:
+    with base.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM ingest_task_items WHERE task_id = %s ORDER BY created_at ASC",
+            (task_id,),
+        )
+        return [IngestTaskItem.model_validate(r) for r in cur.fetchall()]
+
+
+def mark_ingest_task_running(task_id: str) -> IngestTask | None:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE ingest_tasks
+            SET status = 'running',
+                started_at = COALESCE(started_at, now()),
+                updated_at = now()
+            WHERE id = %(id)s AND status = 'queued' AND cancel_requested IS FALSE
+            RETURNING *
+            """,
+            {"id": task_id},
+        )
+        return _model(IngestTask, cur.fetchone())
+
+
+def update_ingest_task_counts(task_id: str) -> IngestTask | None:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH counts AS (
+              SELECT
+                count(*) AS total,
+                count(*) FILTER (WHERE status IN ('ready', 'failed', 'cancelled', 'skipped')) AS completed,
+                count(*) FILTER (WHERE status = 'failed') AS failed,
+                count(*) FILTER (WHERE status = 'skipped') AS skipped
+              FROM ingest_task_items
+              WHERE task_id = %(id)s
+            )
+            UPDATE ingest_tasks
+            SET total_items = counts.total,
+                completed_items = counts.completed,
+                failed_items = counts.failed,
+                skipped_items = counts.skipped,
+                progress = CASE WHEN counts.total > 0
+                  THEN counts.completed::double precision / counts.total::double precision
+                  ELSE 1 END,
+                updated_at = now()
+            FROM counts
+            WHERE ingest_tasks.id = %(id)s
+            RETURNING ingest_tasks.*
+            """,
+            {"id": task_id},
+        )
+        return _model(IngestTask, cur.fetchone())
+
+
+def update_ingest_task_status(
+    task_id: str,
+    status: IngestTaskStatus,
+    *,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> IngestTask | None:
+    terminal = status in {"done", "failed", "cancelled"}
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE ingest_tasks
+            SET status = %(status)s,
+                result = COALESCE(%(result)s, result),
+                error = %(error)s,
+                updated_at = now(),
+                started_at = CASE
+                  WHEN %(status)s = 'running' THEN COALESCE(started_at, now())
+                  ELSE started_at
+                END,
+                finished_at = CASE
+                  WHEN %(terminal)s THEN COALESCE(finished_at, now())
+                  ELSE finished_at
+                END
+            WHERE id = %(id)s
+            RETURNING *
+            """,
+            {
+                "id": task_id,
+                "status": status,
+                "result": _json(result),
+                "error": error,
+                "terminal": terminal,
+            },
+        )
+        return _model(IngestTask, cur.fetchone())
+
+
+def request_ingest_task_cancel(task_id: str) -> IngestTask | None:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE ingest_tasks
+            SET cancel_requested = true,
+                status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END,
+                finished_at = CASE WHEN status = 'queued' THEN now() ELSE finished_at END,
+                updated_at = now()
+            WHERE id = %(id)s
+            RETURNING *
+            """,
+            {"id": task_id},
+        )
+        return _model(IngestTask, cur.fetchone())
+
+
+def ingest_task_should_cancel(task_id: str) -> bool:
+    with base.cursor() as cur:
+        cur.execute("SELECT cancel_requested FROM ingest_tasks WHERE id = %s", (task_id,))
+        row = cur.fetchone()
+        return bool(row and row.get("cancel_requested"))
+
+
+def update_ingest_task_item(
+    item_id: str,
+    *,
+    status: IngestItemStatus | None = None,
+    error: str | None = None,
+    chunk_count: int | None = None,
+    artifact_prefix: str | None = None,
+) -> IngestTaskItem | None:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE ingest_task_items
+            SET status = COALESCE(%(status)s, status),
+                error = %(error)s,
+                chunk_count = COALESCE(%(chunk_count)s, chunk_count),
+                artifact_prefix = COALESCE(%(artifact_prefix)s, artifact_prefix),
+                started_at = CASE
+                  WHEN %(status)s = 'running' THEN COALESCE(started_at, now())
+                  ELSE started_at
+                END,
+                finished_at = CASE
+                  WHEN %(status)s IN ('ready', 'failed', 'cancelled', 'skipped')
+                  THEN COALESCE(finished_at, now())
+                  ELSE finished_at
+                END,
+                updated_at = now()
+            WHERE id = %(id)s
+            RETURNING *
+            """,
+            {
+                "id": item_id,
+                "status": status,
+                "error": error,
+                "chunk_count": chunk_count,
+                "artifact_prefix": artifact_prefix,
+            },
+        )
+        return _model(IngestTaskItem, cur.fetchone())
+
+
+def cancel_pending_ingest_items(task_id: str) -> None:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE ingest_task_items
+            SET status = 'cancelled', updated_at = now(), finished_at = now()
+            WHERE task_id = %s AND status = 'pending'
+            """,
+            (task_id,),
+        )
+
+
+def append_ingest_task_event(
+    task_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+) -> IngestTaskEvent:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH next_seq AS (
+              SELECT COALESCE(MAX(seq), 0) + 1 AS seq
+              FROM ingest_task_events
+              WHERE task_id = %(task_id)s
+            )
+            INSERT INTO ingest_task_events(task_id, seq, type, payload)
+            SELECT %(task_id)s, next_seq.seq, %(type)s, %(payload)s
+            FROM next_seq
+            RETURNING *
+            """,
+            {"task_id": task_id, "type": event_type, "payload": _json(payload)},
+        )
+        return IngestTaskEvent.model_validate(cur.fetchone())
+
+
+def list_ingest_task_events(
+    task_id: str,
+    *,
+    after_seq: int = 0,
+    limit: int = 1000,
+) -> list[IngestTaskEvent]:
+    with base.cursor() as cur:
+        cur.execute(
+            """
+            SELECT * FROM ingest_task_events
+            WHERE task_id = %(task_id)s AND seq > %(after_seq)s
+            ORDER BY seq ASC
+            LIMIT %(limit)s
+            """,
+            {"task_id": task_id, "after_seq": after_seq, "limit": limit},
+        )
+        return [IngestTaskEvent.model_validate(r) for r in cur.fetchall()]

@@ -15,6 +15,8 @@ Visibility = Literal["private", "org", "public"]
 Role = Literal["user", "assistant"]
 MessageStatus = Literal["pending", "streaming", "done", "failed", "stopped"]
 RunStatus = Literal["queued", "running", "done", "failed", "stopped"]
+IngestTaskStatus = Literal["queued", "running", "done", "failed", "cancelled"]
+IngestItemStatus = Literal["pending", "running", "ready", "failed", "cancelled", "skipped"]
 
 
 class Conversation(BaseModel):
@@ -123,6 +125,58 @@ class GenerationRun(BaseModel):
 class MessageEvent(BaseModel):
     id: int | None = None
     run_id: str
+    seq: int
+    type: str
+    payload: dict[str, Any]
+    created_at: datetime | None = None
+
+
+class IngestTask(BaseModel):
+    id: str
+    owner_id: str
+    org_id: str | None = None
+    collection_name: str
+    kind: str = "upload"
+    status: IngestTaskStatus = "queued"
+    progress: float = 0.0
+    total_items: int = 0
+    completed_items: int = 0
+    failed_items: int = 0
+    skipped_items: int = 0
+    cancel_requested: bool = False
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    params: dict[str, Any] | None = None
+    redis_stream: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class IngestTaskItem(BaseModel):
+    id: str
+    task_id: str
+    collection_name: str
+    owner_id: str
+    doc_id: str
+    filename: str | None = None
+    pdf_path: str | None = None
+    doc_dir: str | None = None
+    pdf_object_key: str | None = None
+    artifact_prefix: str | None = None
+    status: IngestItemStatus = "pending"
+    error: str | None = None
+    chunk_count: int = 0
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class IngestTaskEvent(BaseModel):
+    id: int | None = None
+    task_id: str
     seq: int
     type: str
     payload: dict[str, Any]

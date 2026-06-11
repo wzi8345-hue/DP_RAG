@@ -125,6 +125,69 @@ SCHEMA_STATEMENTS: list[str] = [
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_collection_doc_id ON documents(collection_name, doc_id)",
     "CREATE INDEX IF NOT EXISTS idx_documents_coll ON documents(collection_name)",
     "CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner_id)",
+    # ── 解析/入库任务（生产级队列任务） ───────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS ingest_tasks (
+        id              text PRIMARY KEY,
+        owner_id        text NOT NULL,
+        org_id          text,
+        collection_name text NOT NULL REFERENCES kb_collections(name) ON DELETE CASCADE,
+        kind            text NOT NULL DEFAULT 'upload',
+        status          text NOT NULL DEFAULT 'queued',
+        progress        double precision NOT NULL DEFAULT 0,
+        total_items     integer NOT NULL DEFAULT 0,
+        completed_items integer NOT NULL DEFAULT 0,
+        failed_items    integer NOT NULL DEFAULT 0,
+        skipped_items   integer NOT NULL DEFAULT 0,
+        cancel_requested boolean NOT NULL DEFAULT false,
+        result          jsonb,
+        error           text,
+        params          jsonb,
+        redis_stream    text,
+        created_at      timestamptz NOT NULL DEFAULT now(),
+        updated_at      timestamptz NOT NULL DEFAULT now(),
+        started_at      timestamptz,
+        finished_at     timestamptz
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_ingest_tasks_owner ON ingest_tasks(owner_id)",
+    "CREATE INDEX IF NOT EXISTS idx_ingest_tasks_collection ON ingest_tasks(collection_name)",
+    "CREATE INDEX IF NOT EXISTS idx_ingest_tasks_status ON ingest_tasks(status)",
+    """
+    CREATE TABLE IF NOT EXISTS ingest_task_items (
+        id              text PRIMARY KEY,
+        task_id         text NOT NULL REFERENCES ingest_tasks(id) ON DELETE CASCADE,
+        collection_name text NOT NULL,
+        owner_id        text NOT NULL,
+        doc_id          text NOT NULL,
+        filename        text,
+        pdf_path        text,
+        doc_dir         text,
+        pdf_object_key  text,
+        artifact_prefix text,
+        status          text NOT NULL DEFAULT 'pending',
+        error           text,
+        chunk_count     integer NOT NULL DEFAULT 0,
+        created_at      timestamptz NOT NULL DEFAULT now(),
+        updated_at      timestamptz NOT NULL DEFAULT now(),
+        started_at      timestamptz,
+        finished_at     timestamptz
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_ingest_task_items_task ON ingest_task_items(task_id)",
+    "CREATE INDEX IF NOT EXISTS idx_ingest_task_items_status ON ingest_task_items(status)",
+    """
+    CREATE TABLE IF NOT EXISTS ingest_task_events (
+        id         bigserial PRIMARY KEY,
+        task_id    text NOT NULL REFERENCES ingest_tasks(id) ON DELETE CASCADE,
+        seq        bigint NOT NULL,
+        type       text NOT NULL,
+        payload    jsonb NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (task_id, seq)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_ingest_task_events_task_seq ON ingest_task_events(task_id, seq)",
     # ── 自定义 skill 归属与可见性 ───────────────────────────
     """
     CREATE TABLE IF NOT EXISTS user_skills (

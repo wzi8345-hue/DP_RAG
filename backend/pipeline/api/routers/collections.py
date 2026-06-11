@@ -314,21 +314,23 @@ def delete_collection(
         if meta:
             require_write(auth, meta)
     pipe = get_pipeline()
-    deleted = pipe.drop_collection(name)
+    # Milvus 删除是关键操作; drop_collection 会校验删除是否真实生效,
+    # 若残留会抛错。不要让后续本地目录清理结果覆盖 Milvus 删除结论。
+    collection_existed = pipe.drop_collection(name)
 
     # 连带清理本地工作目录 (中间产物 + 原始 PDF)
     kb_dir = kb_workspace_dir(name)
-    if os.path.isdir(kb_dir):
+    local_existed = os.path.isdir(kb_dir)
+    if local_existed:
         try:
             shutil.rmtree(kb_dir)
-            deleted = True
             logger.info(f"[collections] 已清理本地工作目录: {kb_dir}")
         except Exception as e:
             logger.warning(f"[collections] 清理本地目录失败 {kb_dir}: {e}")
     if repo.available():
         repo.delete_collection_metadata(name, auth)
 
-    return DeleteCollectionResponse(deleted=deleted, name=name)
+    return DeleteCollectionResponse(deleted=collection_existed or local_existed, name=name)
 
 
 def _rebuild_collection(task_id: str, collection: str, directory: str) -> Dict[str, Any]:

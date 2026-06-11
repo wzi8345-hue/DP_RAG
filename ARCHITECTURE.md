@@ -230,7 +230,46 @@ documents
   created_at / updated_at
 ```
 
-### 4.5 user_skills（自定义 skill 归属）
+### 4.5 ingest_tasks / ingest_task_items / ingest_task_events（解析入库任务）
+
+解析/入库与对话生成一样采用 Web/Worker 分离：FastAPI Web 只保存上传文件、写 task/items、入 Redis 队列；独立 `ingest-worker` 慢慢执行 parse → chunk → embed → Milvus store，并把进度事件写入 Postgres + Redis Stream。
+
+```text
+ingest_tasks
+  id              text pk
+  owner_id / org_id
+  collection_name text fk -> kb_collections.name
+  kind            text            -- upload / rebuild / parse / load_vec
+  status          text            -- queued | running | done | failed | cancelled
+  progress        float
+  total_items / completed_items / failed_items / skipped_items int
+  cancel_requested boolean
+  result / params jsonb
+  error           text null
+  redis_stream    text
+  created_at / updated_at / started_at / finished_at
+
+ingest_task_items
+  id              text pk
+  task_id         text fk -> ingest_tasks.id
+  collection_name / owner_id / doc_id
+  filename        text
+  pdf_path / doc_dir text       -- worker 当前任务使用的本地缓存路径
+  pdf_object_key / artifact_prefix text
+  status          text          -- pending | running | ready | failed | cancelled | skipped
+  error           text null
+  chunk_count     int
+
+ingest_task_events
+  id              bigserial pk
+  task_id         text fk -> ingest_tasks.id
+  seq             bigint
+  type            text          -- status | progress | item | done | failed | cancelled | error
+  payload         jsonb
+  unique(task_id, seq)
+```
+
+### 4.6 user_skills（自定义 skill 归属）
 
 skill 物理文件仍存 `upload_dir/<owner_id>/`；本表记录归属与可见性，列表合并：内置（只读）∪ 我的 ∪ org-public。
 
@@ -246,7 +285,7 @@ user_skills
   (pk = owner_id + id)
 ```
 
-### 4.6 conversation_shares（分享链接）
+### 4.7 conversation_shares（分享链接）
 
 ```text
 conversation_shares
@@ -259,7 +298,7 @@ conversation_shares
 
 分享链接只授予源对话的只读访问；撤销只让 token 失效，不影响已 copy-to-mine 的独立副本。
 
-### 4.7 对象存储（RustFS / S3 compatible）
+### 4.8 对象存储（RustFS / S3 compatible）
 
 新增 `backend/pipeline/clients/object_store.py`，通过 `boto3` 连接自建 RustFS（S3 path-style + v4 签名）。用途：
 
@@ -320,7 +359,9 @@ class RetrievalSource(Protocol):
 | 对话 | `POST /messages/stop`（body `message_id`） | 停止后台生成（不依赖前端连接） | 新增 |
 | 对话 | `GET /messages/{id}/stream`（SSE） | 重连续读正在生成消息的增量 | 新增 |
 | 文献 | `GET /collections` `POST /collections` `DELETE /collections/{name}` `POST /collections/{name}/rebuild` `PATCH /collections/{name}/visibility` | 文献库 CRUD + 归属/可见性（M9.6 统一 POST） | 改造 |
-| 文献 | `POST /ingest/upload`（multipart）`GET /collections/{name}/documents` `DELETE /collections/{name}/documents/{doc_id}` `POST /documents/pdf-url` `POST /collections/copy-to-mine` | 上传解析入库、文献增删查、PDF 预签名、复制到个人 | 改造/新增 |
+| 文献 | `POST /ingest/upload`（multipart） | submit-only：保存 PDF/对象存储、创建 `ingest_tasks/items`、入 Redis 队列，立即返回 `task_id` | 改造 |
+| 文献 | `GET /ingest/tasks/{task_id}` `GET /ingest/tasks/{task_id}/stream` `POST /ingest/tasks/{task_id}/cancel` | 解析入库任务状态、事件流回放/实时输出、取消 | 新增 |
+| 文献 | `GET /collections/{name}/documents` `DELETE /collections/{name}/documents/{doc_id}` `POST /documents/pdf-url` `POST /collections/copy-to-mine` | 文献增删查、PDF 预签名、复制到个人 | 改造/新增 |
 | 技能 | `GET /skills` `POST /skills` `DELETE /skills/{id}` `PATCH /skills/{id}/visibility` `POST /skills/copy-to-mine` `/skills/template` | skill CRUD + 可见性 + 复制到个人（M9.6 统一 POST） | 改造 |
 | 运维 | `GET /health` `GET /stats`；`POST /doc_summary` | 健康/统计免认证（GET）；doc_summary 业务接口（POST） | 保留/改造 |
 
@@ -330,7 +371,8 @@ class RetrievalSource(Protocol):
 
 ### 6.2 「前端断连后台不停止」与「正在生成不可发起新对话」
 
-- 生成在独立 `backend-worker` 服务中执行，Web 进程只负责入队与 SSE fanout。Worker 将增量写入 `message_events` 并发布到 Redis Stream，同时更新 `messages.content/status`。
+- 对话生成在独立 `backend-worker` 服务中执行，Web 进程只负责入队与 SSE fanout。Worker 将增量写入 `message_events` 并发布到 Redis Stream，同时更新 `messages.content/status`。
+- 文献解析/入库在独立 `ingest-worker` 服务中执行，Web 进程只保存上传文件并创建任务；worker 逐文件处理并写入 `ingest_task_events`。
 - 前端「停止」调用 `POST /runs/{run_id}/stop` 置位取消标志，worker 在下一个事件边界协作式结束并落库 `status=stopped`。
 - 前端在任一消息 `streaming` 期间禁用发送新消息（按钮置灰，复用现有 busy 逻辑），但允许「停止」。
 
@@ -383,14 +425,15 @@ Vue 3 · `<script setup>` · TypeScript · Vite 8 · pnpm · UnoCSS（含 preset
                                                        ├── RustFS/S3 (PDF 原文 + 解析产物)
                                                        ├── Milvus (向量库)
                                                        └── LLM/Embedding/Reranker (内网)
-backend-worker (独立服务进程) ──Redis queue──> generation run ──写 Postgres/Redis Stream
+backend-worker (独立服务进程) ──Redis run queue──> generation run ──写 Postgres/Redis Stream
+ingest-worker  (独立服务进程) ──Redis ingest queue──> parse/embed/store ──写 Postgres/Redis Stream
 Logto: auth.dplink.cc (OIDC + JWKS)
 ```
 
 - 前端构建为静态站点，`base` 与路由需适配自定义域（`rag.hal9k.one`，SPA history 模式 + 404 fallback）。
 - 后端 CORS 允许 `https://rag.hal9k.one` 与本地 `http://localhost:9527`。
 - `VITE_API_BASE` 默认 `https://funmg.dp.tech/sci-loop-api`，本地用 Vite proxy。
-- FastAPI Web 与 generation worker 使用同一后端镜像但独立服务进程：Web 不执行模型生成，worker 不暴露公网 HTTP。
+- FastAPI Web、generation worker、ingest worker 使用同一后端镜像但独立服务进程：Web 不执行模型生成或解析入库长任务，worker 不暴露公网 HTTP。
 
 ---
 
@@ -411,7 +454,7 @@ GitHub Actions：
 
 - **后端服务/鉴权/存储**：`DATABASE_URL`、`LOGTO_ISSUER`、`LOGTO_JWKS_URI`、`LOGTO_AUDIENCE`、`LOGTO_REQUIRED_SCOPE`、`AUTH_DISABLED`、`CORS_ORIGINS`、`API_ROOT_PATH`、`UPLOAD_DIR`、`SESSION_DIR`、`FRONTEND_BASE_URL`。
 - **对象存储（RustFS/S3）**：`OBJECT_STORE_ENDPOINT`、`OBJECT_STORE_PUBLIC_ENDPOINT`、`OBJECT_STORE_ACCESS_KEY`、`OBJECT_STORE_SECRET_KEY`、`OBJECT_STORE_BUCKET`、`OBJECT_STORE_REGION`。
-- **Redis（生产级对话运行）**：`REDIS_URL`、`REDIS_RUN_QUEUE`、`REDIS_RUN_STREAM_PREFIX`、`REDIS_RUN_STREAM_MAXLEN`、`REDIS_RUN_STREAM_TTL`。
+- **Redis（生产级对话/入库运行）**：`REDIS_URL`、`REDIS_RUN_QUEUE`、`REDIS_RUN_STREAM_PREFIX`、`REDIS_RUN_STREAM_MAXLEN`、`REDIS_RUN_STREAM_TTL`、`REDIS_INGEST_QUEUE`、`REDIS_INGEST_STREAM_PREFIX`、`REDIS_INGEST_STREAM_MAXLEN`、`REDIS_INGEST_STREAM_TTL`。
 - **基建连接（pipeline，容器化的主要配置方式）**：通过环境变量覆盖 pipeline 配置，**镜像无需挂载 YAML**。加载优先级：`default_config.yaml < CONFIG_PATH 文件 < 环境变量 < 运行时`。映射表见 `backend/pipeline/config.py` 的 `_ENV_OVERRIDES`：
   - Embedding：`EMBEDDING_API_BASE` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL`
   - Milvus：`MILVUS_BACKEND` / `MILVUS_URI` / `MILVUS_TOKEN` / `MILVUS_DB_NAME` / `MILVUS_COLLECTION` / `MILVUS_DIM`
@@ -441,3 +484,4 @@ GitHub Actions：
 | 10 | PDF 原文与解析产物进入 RustFS/S3 | 多副本后端可重建；前端引用原文用预签名 URL，避免后端转发大文件 |
 | 11 | 分享授权与副本解耦 | 撤销分享只影响源链接；copy-to-mine 后副本独立，后续问答使用新 owner 权限 |
 | 12 | 对话生成采用 run-based Web/Worker 分离 | Web 只入队和 SSE fanout；worker 执行长任务；Postgres 权威存储，Redis 负责队列与实时事件 |
+| 13 | 解析入库采用 ingest task Web/Worker 分离 | 上传接口只提交任务；ingest-worker 逐文件处理；Postgres 回放进度，Redis 负责实时事件 |

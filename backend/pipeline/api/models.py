@@ -159,6 +159,31 @@ class TaskResponse(BaseModel):
     created_at: float = 0.0
 
 
+class IngestTaskItemResponse(BaseModel):
+    id: str
+    doc_id: str
+    filename: str | None = None
+    status: str = "pending"
+    error: str | None = None
+    chunk_count: int = 0
+
+
+class IngestTaskResponse(BaseModel):
+    id: str
+    collection_name: str
+    status: str
+    progress: float = 0.0
+    total_items: int = 0
+    completed_items: int = 0
+    failed_items: int = 0
+    skipped_items: int = 0
+    cancel_requested: bool = False
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    created_at: float = 0.0
+    items: list[IngestTaskItemResponse] = []
+
+
 # ---------------------------------------------------------------------------
 # 通用
 # ---------------------------------------------------------------------------

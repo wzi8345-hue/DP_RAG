@@ -256,16 +256,16 @@ milvus:
     # AUTOINDEX: Lite -> FLAT, 集群 -> HNSW; 零运维
     # HNSW    : params 例 {M: 16, efConstruction: 200}; 适合 < 1M 量级
     # IVF_FLAT: params 例 {nlist: 1024}; 适合更大数据量
-    dense_type: "AUTOINDEX"
+    dense_type: "HNSW"
     dense_metric: "COSINE"             # IP (内积, 配合 normalize=true 等价 cosine) / L2 / COSINE
-    dense_params: {}               # HNSW: {M:16, efConstruction:200}; IVF: {nlist:1024}
+    dense_params: {M: 16, efConstruction: 200}
 
 # ── 检索 ───────────────────────────────────────────────────────────────
 retrieval:
   mode: "hybrid"                   # hybrid (dense+bm25) / vector / bm25 / metadata
   top_k: 8
   rrf_k: 60
-  per_retriever_k: 15              # hybrid 每路召回上限 (原 10 → 15, 给 rerank 更多候选)
+  per_retriever_k: 20              # hybrid 每路召回上限 (给 rerank 更多候选)
   dense_weight: 0.7                # hybrid RRF 中 dense 的权重 (static 模式 / 构建默认值)
   bm25_weight: 0.3                 # hybrid RRF 中 bm25 的权重
   doc_id: null
@@ -310,7 +310,7 @@ retrieval:
   progressive:
     level1_mode: hybrid
     level1_per_retriever_k: 5          # L1: vector/bm25 各 top-5 doc → 合并
-    l2_per_path_k: 15                  # L2: 每路 top-15 chunk (原 10)
+    l2_per_path_k: 20                  # L2: 每路 top-20 chunk
     l2_max_candidate_docs: 10          # L1 合并 doc 上限
     l2_drill_min_score: 0.8           # 合并 doc 内探测: 双路 top-1 平均分 ≥ 此值 → doc-scoped L2
     enable_global_chunk_fallback: true  # 低置信 → 全库 chunk 双路 top-10
@@ -338,7 +338,7 @@ retrieval:
     # HNSW: {ef: 64} 大 -> 召回↑ 延迟↑
     # IVF*: {nprobe: 10}
     # AUTOINDEX: {} 留空
-    dense: {ef: 128}               # HNSW search ef; 64→128 提升 dense 召回 (略增延迟)
+    dense: {ef: 192}               # HNSW search ef; 大 → 召回↑ 延迟↑
     bm25:
       drop_ratio_search: 0.0       # 0~1, 大 -> 丢弃低权重 token, 性能↑ 召回↓
   context:

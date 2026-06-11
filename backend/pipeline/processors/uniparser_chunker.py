@@ -54,7 +54,6 @@ import json
 import logging
 import os
 import re
-import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from ..clients.embedding import EmbeddingClient
@@ -72,6 +71,10 @@ from .chunker import (
     is_garbled_text,
     _normalize_text,
     sanitize_section,
+    # 对齐 MinerU 正文质量: 逻辑段落合并 (含误切合并/短段合并) + 期刊元数据行过滤
+    _is_metadata_line,
+    _group_logical_paragraphs,
+    _group_combined_text,
     SUMMARY_QUERY_TEXTS,
     SUMMARY_SIM_THRESHOLD,
     REFERENCES_SECTION_PATTERNS,
@@ -652,6 +655,9 @@ def build_knowledge_blocks_uniparser(
     cur_section_is_summary = False
     cur_section_is_references = False
     pending_ref_blocks: List[Dict[str, Any]] = []  # 累积 reference 块 (引用条目)
+    # 累积连续 paragraph 块, 在被非段落块 (title/公式/表/图/reference) 打断时,
+    # 用 MinerU 同款逻辑段落分组 (误切合并 + 短段合并 + 期刊元数据行丢弃) 后再成 chunk.
+    pending_para_blocks: List[Dict[str, Any]] = []
     paragraph_counter = [0]
 
     def _next_para_idx() -> int:
@@ -694,13 +700,75 @@ def build_knowledge_blocks_uniparser(
         pending_summary_texts = []
         pending_summary_pages = set()
 
+    def _flush_pending_paragraphs() -> None:
+        """把缓冲的连续 paragraph 块按 MinerU 逻辑段落分组后成 text chunk。
+
+        复用 ``_group_logical_paragraphs`` (= 误切合并 + 短段合并 + 期刊元数据行
+        丢弃), 与 MinerU 支路同款; 之后长段仍走 ``_maybe_split_text_chunk``.
+        preamble (首个 section title 之前的正文) 不占段号, 打 ``is_preamble``,
+        与 MinerU 对齐。
+        """
+        nonlocal pending_para_blocks
+        if not pending_para_blocks:
+            return
+        blocks = pending_para_blocks
+        pending_para_blocks = []
+        # 转成 MinerU content_list_v2 风格的 paragraph item, 复用其分组逻辑;
+        # 额外挂 _page 以便分组后还原页码 (分组函数不读该字段, 不受影响)。
+        mineru_items: List[Dict[str, Any]] = []
+        for pb in blocks:
+            txt = _block_text(pb)
+            if not txt:
+                continue
+            mineru_items.append({
+                "type": "paragraph",
+                "content": {"paragraph_content": [{"type": "text", "content": txt}]},
+                "_page": int(pb.get("page", 0)),
+            })
+        if not mineru_items:
+            return
+        groups = _group_logical_paragraphs(mineru_items)
+        is_preamble = (not cur_section.strip()) and not cur_section_is_summary
+        for group in groups:
+            combined = _group_combined_text(group)
+            if not combined:
+                continue
+            pages_in_group = sorted({int(it.get("_page", 0)) for it in group})
+            page = pages_in_group[0] if pages_in_group else 0
+            para_idx = -1 if is_preamble else _next_para_idx()
+            base = _build_paragraph_chunk(
+                combined, section=cur_section, page=page, paragraph_index=para_idx,
+            )
+            if not base:
+                continue
+            if pages_in_group:
+                base["pages"] = pages_in_group
+            if is_preamble:
+                base["is_preamble"] = True
+            split = _maybe_split_text_chunk(
+                base, embedder,
+                target_chars=split_target_chars,
+                max_chars=split_max_chars,
+                min_chars=split_min_chars,
+                breakpoint_percentile=split_breakpoint_percentile,
+                length_fn=split_length_fn,
+                overlap_chars=split_overlap,
+            )
+            for sc in split:
+                if "paragraph_index" not in sc:
+                    sc["paragraph_index"] = base["paragraph_index"]
+                if is_preamble and sc.get("type") == "text":
+                    sc["is_preamble"] = True
+            chunks.extend(split)
+
     # 主循环: 按全局阅读序遍历 blocks
     for idx, b in enumerate(all_blocks):
         t = b.get("type")
 
         # —— section 切换 ——
         if t == TITLE_TYPE:
-            # 在切 section 之前, 清空当前 section 的累积 (references / summary)
+            # 在切 section 之前, 清空当前 section 的累积 (正文 / references / summary)
+            _flush_pending_paragraphs()
             _flush_pending_references()
             _flush_pending_summary()
             new_section = sanitize_section(_block_text(b))
@@ -725,6 +793,7 @@ def build_knowledge_blocks_uniparser(
         # —— reference 类块在非 references section 里: 也按 references 类型聚合 ——
         # (UniParser 偶尔把零散引用判到正文段尾, 比如 last page 末尾, 没显式 title 切换)
         if t == REFERENCE_TYPE:
+            _flush_pending_paragraphs()  # reference 打断正文段, 先 flush 已缓冲的段落
             pending_ref_blocks.append(b)
             continue
         # 一旦碰到非 reference 块, 先 flush 之前累积的 reference (如果有)
@@ -734,13 +803,15 @@ def build_knowledge_blocks_uniparser(
         # —— 摘要 section: paragraph 累积, 其它类型 (公式/图/表) 仍正常出 chunk ——
         if cur_section_is_summary and t in TEXT_LIKE_TYPES:
             txt = _block_text(b)
-            if txt:
+            # 期刊元数据行 (中图分类号/DOI/收稿日期 等) 不进摘要, 与 MinerU 对齐
+            if txt and not _is_metadata_line(txt):
                 pending_summary_texts.append(txt)
                 pending_summary_pages.add(int(b.get("page", 0)))
             continue
 
         # —— equation 块 -> equation chunk ——
         if t == EQUATION_TYPE:
+            _flush_pending_paragraphs()  # 公式打断正文段, 先把缓冲段落成 chunk
             _flush_pending_summary()  # 公式作为 section 内边界, summary 先 flush
             latex = (b.get("latex_repr") or "").strip()
             if not latex:
@@ -757,6 +828,7 @@ def build_knowledge_blocks_uniparser(
 
         # —— table 块 -> table chunk ——
         if t == TABLE_TYPE:
+            _flush_pending_paragraphs()
             _flush_pending_summary()
             # source=pages_tree 时按 group_id 去重
             gid = b.get("_group_id")
@@ -774,6 +846,7 @@ def build_knowledge_blocks_uniparser(
 
         # —— imagecaption -> image chunk (锚定 1 个 logical figure, 不论它含几个子面板) ——
         if t == IMAGECAPTION_TYPE:
+            _flush_pending_paragraphs()
             _flush_pending_summary()
             # source=pages_tree 时按 group_id 去重: 同 group 多个 caption 只取一次
             gid = b.get("_group_id")
@@ -800,31 +873,11 @@ def build_knowledge_blocks_uniparser(
         if t in CAPTION_TYPES:
             continue
 
-        # —— paragraph -> text chunk (长段走 semantic_split) ——
+        # —— paragraph: 先缓冲, 在被非段落块打断 / section 结束时统一做逻辑段落分组 ——
+        # (对齐 MinerU: 误切合并 + 短段合并 + 期刊元数据行丢弃, 再走 semantic_split)
         if t in TEXT_LIKE_TYPES:
-            txt = _block_text(b)
-            if not txt:
-                continue
-            base = _build_paragraph_chunk(
-                txt, section=cur_section,
-                page=int(b.get("page", 0)),
-                paragraph_index=_next_para_idx(),
-            )
-            if not base:
-                continue
-            split = _maybe_split_text_chunk(
-                base, embedder,
-                target_chars=split_target_chars,
-                max_chars=split_max_chars,
-                min_chars=split_min_chars,
-                breakpoint_percentile=split_breakpoint_percentile,
-                length_fn=split_length_fn,
-                overlap_chars=split_overlap,
-            )
-            for sc in split:
-                if "paragraph_index" not in sc:
-                    sc["paragraph_index"] = base["paragraph_index"]
-            chunks.extend(split)
+            if _block_text(b):
+                pending_para_blocks.append(b)
             continue
 
         # —— 其它未知类型: 默默丢 (有 text 字段才记录 warning) ——
@@ -832,6 +885,7 @@ def build_knowledge_blocks_uniparser(
             logger.debug(f"[uniparser-chunker] 未处理 type={t!r} page={b.get('page')}")
 
     # —— 收尾 flush ——
+    _flush_pending_paragraphs()
     _flush_pending_summary()
     _flush_pending_references()
 
@@ -897,7 +951,16 @@ def build_knowledge_blocks_uniparser(
                     break
             chunks.insert(insert_at, summary_chunk)
 
-    # —— cross-ref: 扫 Fig. N / Table N 字面量, 给 text/summary 挂 related_assets ——
+    # —— 章节锚点兜底 (对齐 MinerU chunker._flush_section 的 section 锚点链接): ——
+    # 同一 section 内, 每个 text/summary chunk 挂上本节所有 image/table chunk,
+    # asset chunk 反向挂回本节首个 text/summary chunk。这样即便正文没写 "图N/Fig.N",
+    # 检索侧 assets 邻域扩展也能把本节图表作为互补上下文带出 (修复"问图表找不到")。
+    # 必须在 cross-ref 之前跑 (此时 asset 的 _label 还在, 用于生成可读 label)。
+    _link_section_assets(chunks)
+
+    # —— cross-ref: 扫 Fig. N / Table N 字面量, **合并**进 related_assets ——
+    # 合并而非覆盖: 保留上面 _link_section_assets 建立的章节锚点链接, 再并入
+    # 显式交叉引用 (按 chunk_id 去重), 与 MinerU chunker 的合并语义一致。
     for c in chunks:
         if c.get("type") == "references":
             c.pop("_label", None)
@@ -905,20 +968,23 @@ def build_knowledge_blocks_uniparser(
         ref_text = (c.get("content") or "" if c["type"] in ("text", "summary")
                     else (c.get("content") or "") + " " + (c.get("context") or ""))
         refs = _scan_cross_refs(ref_text)
-        related: List[Dict[str, str]] = []
+        related: List[Dict[str, str]] = list(c.get("related_assets") or [])
+        seen_ids = {a.get("chunk_id") for a in related if isinstance(a, dict)}
         self_label = c.get("_label")
         for fig in refs.get("figures", []):
             if fig == self_label:
                 continue
             fid = figure_idx.get(fig)
-            if fid and fid != c["id"]:
+            if fid and fid != c["id"] and fid not in seen_ids:
                 related.append({"type": "image", "label": f"Fig. {fig}", "chunk_id": fid})
+                seen_ids.add(fid)
         for tab in refs.get("tables", []):
             if tab == self_label:
                 continue
             tid = table_idx.get(tab)
-            if tid and tid != c["id"]:
+            if tid and tid != c["id"] and tid not in seen_ids:
                 related.append({"type": "table", "label": f"Table {tab}", "chunk_id": tid})
+                seen_ids.add(tid)
         c["related_assets"] = related
         c.pop("_label", None)
 
@@ -929,6 +995,72 @@ def build_knowledge_blocks_uniparser(
 
 
 # ── 工具函数 ───────────────────────────────────────────────────────────
+
+
+def _link_section_assets(chunks: List[Dict[str, Any]]) -> None:
+    """章节锚点兜底: 按文档阅读序的连续 section, 双向关联本节 image/table 与
+    text/summary chunk (对齐 MinerU ``chunker._flush_section`` 的 section 锚点)。
+
+    - 每个 text/summary chunk.related_assets += 本节每个 asset (合并去重);
+    - 每个 asset chunk.related_assets += 本节首个 text/summary chunk (anchor)。
+
+    references chunk 不参与 (被引文献的图号不应链到本文图表), 同时作为分段边界。
+    合并而非覆盖: 由调用方后续的 cross-ref 再并入显式 "图N/表N" 引用。
+    asset 的 label 取其 ``_label`` (Fig./Table 编号); 没有编号则退化为类型名。
+    """
+    asset_types = ("image", "table")
+    text_types = ("text", "summary")
+    n = len(chunks)
+    i = 0
+    while i < n:
+        if chunks[i].get("type") == "references":
+            i += 1
+            continue
+        sec = chunks[i].get("section")
+        # 收集连续同 section 的一段 (遇 references 或 section 变化即断开)
+        j = i
+        run: List[Dict[str, Any]] = []
+        while j < n:
+            cj = chunks[j]
+            if cj.get("type") == "references" or cj.get("section") != sec:
+                break
+            run.append(cj)
+            j += 1
+
+        texts = [x for x in run if x.get("type") in text_types]
+        assets = [x for x in run if x.get("type") in asset_types]
+        if texts and assets:
+            # text/summary ← 本节所有 asset
+            for tc in texts:
+                rel = list(tc.get("related_assets") or [])
+                seen = {a.get("chunk_id") for a in rel if isinstance(a, dict)}
+                for ac in assets:
+                    aid = ac.get("id")
+                    if not aid or aid in seen:
+                        continue
+                    lab = ac.get("_label")
+                    if ac.get("type") == "image":
+                        label = f"Fig. {lab}" if lab else "image"
+                    else:
+                        label = f"Table {lab}" if lab else "table"
+                    rel.append({"type": ac["type"], "label": label, "chunk_id": aid})
+                    seen.add(aid)
+                tc["related_assets"] = rel
+            # asset → 本节首个 text/summary (anchor)
+            anchor = texts[0]
+            anchor_id = anchor.get("id")
+            for ac in assets:
+                rel = list(ac.get("related_assets") or [])
+                seen = {a.get("chunk_id") for a in rel if isinstance(a, dict)}
+                if anchor_id and anchor_id not in seen:
+                    rel.append({
+                        "type": anchor["type"],
+                        "label": sec or "section_text",
+                        "chunk_id": anchor_id,
+                    })
+                ac["related_assets"] = rel
+
+        i = j if j > i else i + 1
 
 
 def _is_references_section_text(section: str) -> bool:

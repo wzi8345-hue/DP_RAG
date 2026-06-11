@@ -166,12 +166,43 @@ export interface DocumentInfo {
 
 export interface TaskResponse {
   id: string
-  status: 'pending' | 'running' | 'done' | 'failed' | string
+  status: 'queued' | 'pending' | 'running' | 'done' | 'failed' | 'cancelled' | string
   progress: number
   result?: unknown
   error?: string | null
   created_at: number
 }
+
+export interface IngestTaskItem {
+  id: string
+  doc_id: string
+  filename?: string | null
+  status: 'pending' | 'running' | 'ready' | 'failed' | 'cancelled' | 'skipped' | string
+  error?: string | null
+  chunk_count: number
+}
+
+export interface IngestTask {
+  id: string
+  collection_name: string
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | string
+  progress: number
+  total_items: number
+  completed_items: number
+  failed_items: number
+  skipped_items: number
+  cancel_requested: boolean
+  result?: Record<string, unknown> | null
+  error?: string | null
+  created_at: number
+  items: IngestTaskItem[]
+}
+
+export type IngestTaskEvent =
+  | { type: 'status'; status: string; task_id?: string; seq?: number }
+  | { type: 'progress'; progress: number; completed_items?: number; failed_items?: number; skipped_items?: number; total_items?: number; task_id?: string; seq?: number }
+  | { type: 'item'; item_id: string; doc_id: string; status: string; error?: string | null; chunk_count?: number; task_id?: string; seq?: number }
+  | { type: 'done' | 'failed' | 'cancelled' | 'error'; status?: string; message?: string; result?: Record<string, unknown>; task_id?: string; seq?: number }
 
 // ── 技能 ───────────────────────────────────────────────────
 export interface SkillSpec {
