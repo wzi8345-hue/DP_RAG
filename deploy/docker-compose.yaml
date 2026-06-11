@@ -1,5 +1,6 @@
-# DP-RAG 部署编排：backend + postgres（前端走 GitHub Pages，或用 frontend 服务自托管）。
-# Milvus / LLM / Embedding 视为外部服务，通过环境变量配置连接（无需挂载 YAML）。
+# DP-RAG 部署编排：backend + worker + postgres + redis + milvus + rustfs
+# 前端走 GitHub Pages，或用 frontend 服务自托管。
+# LLM / Embedding / Reranker 视为外部服务，通过环境变量配置连接（无需挂载 YAML）。
 #
 # 用法：
 #   cp .env.example .env && 编辑
@@ -37,6 +38,22 @@ services:
     ports:
       - '${REDIS_PORT:-6379}:6379'
 
+  milvus:
+    image: milvusdb/milvus:v2.5.4
+    restart: unless-stopped
+    command: ['milvus', 'run', 'standalone']
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_USE_EMBED: 'true'
+      ETCD_DATA_DIR: '/var/lib/milvus/etcd'
+      COMMON_STORAGETYPE: 'local'
+    volumes:
+      - milvus-data:/var/lib/milvus
+    ports:
+      - '${MILVUS_PORT:-19530}:19530'
+      - '${MILVUS_METRICS_PORT:-9091}:9091'
+
   rustfs:
     image: rustfs/rustfs:latest
     restart: unless-stopped
@@ -59,6 +76,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      milvus:
+        condition: service_started
       rustfs:
         condition: service_started
     environment:
@@ -74,7 +93,10 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
       SESSION_DIR: ${SESSION_DIR:-/data/sessions}
+      TASK_DIR: ${TASK_DIR:-/data/tasks}
       TASK_MAX_WORKERS: ${TASK_MAX_WORKERS:-2}
+      UPLOAD_MAX_FILES: ${UPLOAD_MAX_FILES:-200}
+      UPLOAD_MAX_TOTAL_MB: ${UPLOAD_MAX_TOTAL_MB:-500}
       OBJECT_STORE_ENDPOINT: ${OBJECT_STORE_ENDPOINT:-http://rustfs:9000}
       OBJECT_STORE_PUBLIC_ENDPOINT: ${OBJECT_STORE_PUBLIC_ENDPOINT:-http://localhost:9000}
       OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY:-dprag}
@@ -86,6 +108,10 @@ services:
       REDIS_RUN_STREAM_PREFIX: ${REDIS_RUN_STREAM_PREFIX:-dprag:generation:stream}
       REDIS_RUN_STREAM_MAXLEN: ${REDIS_RUN_STREAM_MAXLEN:-2000}
       REDIS_RUN_STREAM_TTL: ${REDIS_RUN_STREAM_TTL:-86400}
+      REDIS_INGEST_QUEUE: ${REDIS_INGEST_QUEUE:-dprag:ingest:tasks}
+      REDIS_INGEST_STREAM_PREFIX: ${REDIS_INGEST_STREAM_PREFIX:-dprag:ingest:stream}
+      REDIS_INGEST_STREAM_MAXLEN: ${REDIS_INGEST_STREAM_MAXLEN:-2000}
+      REDIS_INGEST_STREAM_TTL: ${REDIS_INGEST_STREAM_TTL:-86400}
       # ── 基建服务连接（环境变量覆盖 pipeline 配置；无需挂载 YAML） ──
       # 留空的变量会被后端忽略（保留 default_config 默认值）。
       EMBEDDING_API_BASE: ${EMBEDDING_API_BASE:-}
@@ -120,12 +146,16 @@ services:
 
   worker:
     image: ${BACKEND_IMAGE}
+    build:
+      context: ../backend
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      milvus:
+        condition: service_started
       rustfs:
         condition: service_started
     command: python -m pipeline.workers.generation
@@ -134,6 +164,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
       SESSION_DIR: ${SESSION_DIR:-/data/sessions}
+      TASK_DIR: ${TASK_DIR:-/data/tasks}
       OBJECT_STORE_ENDPOINT: ${OBJECT_STORE_ENDPOINT:-http://rustfs:9000}
       OBJECT_STORE_PUBLIC_ENDPOINT: ${OBJECT_STORE_PUBLIC_ENDPOINT:-http://localhost:9000}
       OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY:-dprag}
@@ -145,6 +176,69 @@ services:
       REDIS_RUN_STREAM_PREFIX: ${REDIS_RUN_STREAM_PREFIX:-dprag:generation:stream}
       REDIS_RUN_STREAM_MAXLEN: ${REDIS_RUN_STREAM_MAXLEN:-2000}
       REDIS_RUN_STREAM_TTL: ${REDIS_RUN_STREAM_TTL:-86400}
+      REDIS_INGEST_QUEUE: ${REDIS_INGEST_QUEUE:-dprag:ingest:tasks}
+      REDIS_INGEST_STREAM_PREFIX: ${REDIS_INGEST_STREAM_PREFIX:-dprag:ingest:stream}
+      REDIS_INGEST_STREAM_MAXLEN: ${REDIS_INGEST_STREAM_MAXLEN:-2000}
+      REDIS_INGEST_STREAM_TTL: ${REDIS_INGEST_STREAM_TTL:-86400}
+      INGEST_WORKER_CONCURRENCY: ${INGEST_WORKER_CONCURRENCY:-1}
+      INGEST_CANCEL_CHECK_INTERVAL: ${INGEST_CANCEL_CHECK_INTERVAL:-1}
+      EMBEDDING_API_BASE: ${EMBEDDING_API_BASE:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      MILVUS_BACKEND: ${MILVUS_BACKEND:-server}
+      MILVUS_URI: ${MILVUS_URI:-}
+      MILVUS_TOKEN: ${MILVUS_TOKEN:-}
+      MILVUS_DB_NAME: ${MILVUS_DB_NAME:-}
+      MILVUS_COLLECTION: ${MILVUS_COLLECTION:-}
+      MILVUS_DIM: ${MILVUS_DIM:-}
+      LLM_API_BASE: ${LLM_API_BASE:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      RERANKER_API_BASE: ${RERANKER_API_BASE:-}
+      RERANKER_API_KEY: ${RERANKER_API_KEY:-}
+      RERANKER_MODEL: ${RERANKER_MODEL:-}
+      REFLECTION_API_BASE: ${REFLECTION_API_BASE:-}
+      REFLECTION_API_KEY: ${REFLECTION_API_KEY:-}
+      REFLECTION_MODEL: ${REFLECTION_MODEL:-}
+      PARSER_BACKEND: ${PARSER_BACKEND:-}
+      MINERU_AUTHORIZATION: ${MINERU_AUTHORIZATION:-}
+      UNIPARSER_API_KEY: ${UNIPARSER_API_KEY:-}
+      CONFIG_PATH: ${CONFIG_PATH:-}
+    volumes:
+      - rag-data:/data
+
+  ingest-worker:
+    image: ${BACKEND_IMAGE}
+    build:
+      context: ../backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_started
+      rustfs:
+        condition: service_started
+    command: python -m pipeline.workers.ingest
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: ${DATABASE_URL}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
+      SESSION_DIR: ${SESSION_DIR:-/data/sessions}
+      TASK_DIR: ${TASK_DIR:-/data/tasks}
+      OBJECT_STORE_ENDPOINT: ${OBJECT_STORE_ENDPOINT:-http://rustfs:9000}
+      OBJECT_STORE_PUBLIC_ENDPOINT: ${OBJECT_STORE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      OBJECT_STORE_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY:-dprag}
+      OBJECT_STORE_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY:-change-me-object-store}
+      OBJECT_STORE_BUCKET: ${OBJECT_STORE_BUCKET:-dprag}
+      OBJECT_STORE_REGION: ${OBJECT_STORE_REGION:-us-east-1}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_INGEST_QUEUE: ${REDIS_INGEST_QUEUE:-dprag:ingest:tasks}
+      REDIS_INGEST_STREAM_PREFIX: ${REDIS_INGEST_STREAM_PREFIX:-dprag:ingest:stream}
+      REDIS_INGEST_STREAM_MAXLEN: ${REDIS_INGEST_STREAM_MAXLEN:-2000}
+      REDIS_INGEST_STREAM_TTL: ${REDIS_INGEST_STREAM_TTL:-86400}
       EMBEDDING_API_BASE: ${EMBEDDING_API_BASE:-}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
@@ -185,5 +279,6 @@ services:
 volumes:
   pg-data:
   redis-data:
+  milvus-data:
   rag-data:
   rustfs-data:

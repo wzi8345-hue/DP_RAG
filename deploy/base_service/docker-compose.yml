@@ -1,5 +1,5 @@
-# DP-RAG 容器服务一键编排
-# 忠实复刻 docs/容器部署文档.md 中的 5 条 docker run 命令。
+# DP-RAG 模型服务一键编排
+# Milvus 已移动到 deploy/docker-compose.yaml，与 Postgres/Redis 同级管理。
 #
 # 用法（在含三个模型目录的工作目录下）:
 #   docker compose -f docker-compose.yml up -d
@@ -25,25 +25,6 @@ x-gpus-all: &gpus-all
           capabilities: [gpu]
 
 services:
-  # ── Milvus 向量库 (单机版, 内嵌 etcd) ──────────────────────────
-  milvus-standalone:
-    image: milvusdb/milvus:v2.5.4
-    container_name: milvus-standalone
-    command: ["milvus", "run", "standalone"]
-    security_opt:
-      - seccomp:unconfined
-    environment:
-      ETCD_USE_EMBED: "true"
-      ETCD_DATA_DIR: "/var/lib/milvus/etcd"
-      COMMON_STORAGETYPE: "local"
-    ports:
-      - "19530:19530"
-      - "9091:9091"
-    # 原 docker run 命令未挂卷(数据随容器销毁); 这里加命名卷持久化, 更安全。
-    volumes:
-      - milvus-data:/var/lib/milvus
-    restart: unless-stopped
-
   # ── Embedding: Qwen3-Embedding-4B (端口 8002) ─────────────────
   vllm-embed:
     image: vllm/vllm-openai:latest
@@ -122,13 +103,3 @@ services:
     deploy: *gpus-all
     restart: unless-stopped
 
-  # ── Attu: Milvus 可视化 (端口 3000) ───────────────────────────
-  milvus-attu:
-    image: zilliz/attu:v2.5.10
-    container_name: milvus-attu
-    ports:
-      - "3000:3000"
-    restart: unless-stopped
-
-volumes:
-  milvus-data:
