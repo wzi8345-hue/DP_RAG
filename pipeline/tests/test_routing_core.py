@@ -159,5 +159,64 @@ class TestRoutingCoreP0P1Guards(unittest.TestCase):
         self.assertNotEqual((outcome.chunk_type or "").lower(), "references")
 
 
+class TestReflectZeroHitsFastPath(unittest.TestCase):
+    """0 命中快速路径应保留原决策的锚点/过滤与 LLM 改写关键词 (HIGH-1 回归)。"""
+
+    def _core(self):
+        # reflect_llm 非 None 才会进入 reflect 主体; total_hits=0 时不会真的调用它
+        return RoutingCore(router_llm=None, reflect_llm=_FakeToolLLM())
+
+    def test_zero_hits_preserves_anchors_and_rewrites(self):
+        last = RouteDecision(
+            routes=["local"],
+            rewrites={"local": "参考文献 references 列表"},
+            chunk_type="references",
+            target_docs=["Some Paper Title"],
+            target_doc_ids=["doc_x"],
+            time="2018-2024",
+            fig_refs=["3"],
+            page_refs=[5],
+            entities=["Nitinol"],
+            retrieve_bias="keyword",
+        )
+        verdict = self._core().reflect(
+            query="这篇文献的参考文献有哪些",
+            last_decision=last,
+            results_summary="",
+            total_hits=0,
+            max_retries=1,
+        )
+        self.assertTrue(verdict.needs_retry)
+        self.assertEqual(verdict.cause, "zero")
+        dec = verdict.decision
+        self.assertIsInstance(dec, RouteDecision)
+        # 路径切到 progressive 做广搜
+        self.assertEqual(dec.routes, ["progressive"])
+        # 关键: 锚点/过滤被保留, 而非清空
+        self.assertEqual(dec.chunk_type, "references")
+        self.assertEqual(dec.target_docs, ["Some Paper Title"])
+        self.assertEqual(dec.target_doc_ids, ["doc_x"])
+        self.assertEqual(dec.time, "2018-2024")
+        self.assertEqual(dec.fig_refs, ["3"])
+        self.assertEqual(dec.page_refs, [5])
+        self.assertEqual(dec.entities, ["Nitinol"])
+        self.assertEqual(dec.retrieve_bias, "keyword")
+        # 关键: 沿用 LLM 改写关键词, 而非回退用户原话
+        self.assertEqual(dec.rewrites.get("progressive"), "参考文献 references 列表")
+
+    def test_zero_hits_without_prior_decision_falls_back_to_query(self):
+        verdict = self._core().reflect(
+            query="某个问题",
+            last_decision=None,
+            results_summary="",
+            total_hits=0,
+            max_retries=1,
+        )
+        self.assertTrue(verdict.needs_retry)
+        dec = verdict.decision
+        self.assertEqual(dec.routes, ["progressive"])
+        self.assertEqual(dec.rewrites.get("progressive"), "某个问题")
+
+
 if __name__ == "__main__":
     unittest.main()

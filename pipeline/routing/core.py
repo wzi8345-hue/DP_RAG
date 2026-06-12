@@ -692,20 +692,37 @@ class RoutingCore:
                 },
             )
 
-        # 0 命中快速路径: 直接重试默认 progressive (避免无意义 LLM 调用)
+        # 0 命中快速路径: 直接重试 progressive (避免无意义 LLM 调用)。
+        # 关键: 保留原决策的锚点/过滤 (target_docs/target_doc_ids/chunk_type/time/
+        # fig_refs/table_refs/page_refs/paragraph_refs/entities) 与 LLM 改写的关键词,
+        # 仅把路径切到 progressive 做 chunk 级广搜, 避免退化成"全库泛搜+用户原话"丢失意图。
         if total_hits == 0:
-            prev_bias = None
-            if isinstance(last_decision, RouteDecision):
-                prev_bias = last_decision.retrieve_bias
-            new_dec = RouteDecision(
-                routes=["progressive"],
-                rewrites={"progressive": query},
-                retrieve_bias=prev_bias or infer_retrieve_bias_heuristic(query),
-                reasoning="(reflect-empty-fast-path)",
-            )
+            base = last_decision if isinstance(last_decision, RouteDecision) else None
+            if base is not None:
+                # 取上一轮任一非空改写 (优先原路径的改写), 而非回退用户原话
+                prev_kw = next(
+                    (v for v in (base.rewrites or {}).values() if v and v.strip()),
+                    query,
+                )
+                new_dec = base.model_copy(update={
+                    "routes": ["progressive"],
+                    "rewrites": {"progressive": prev_kw},
+                    "retrieve_bias": base.retrieve_bias or infer_retrieve_bias_heuristic(query),
+                    "reasoning": "(reflect-empty-fast-path)",
+                })
+            else:
+                new_dec = RouteDecision(
+                    routes=["progressive"],
+                    rewrites={"progressive": query},
+                    retrieve_bias=infer_retrieve_bias_heuristic(query),
+                    reasoning="(reflect-empty-fast-path)",
+                )
             logger.info(
                 f"[{cid}] [routing.reflect] zero_hits fast-path: needs_retry=True "
-                f"cause=zero new_routes=['progressive']"
+                f"cause=zero new_routes=['progressive'] "
+                f"kept_anchors={{'target_docs': {len(new_dec.target_docs)}, "
+                f"'target_doc_ids': {len(new_dec.target_doc_ids)}, "
+                f"'chunk_type': {new_dec.chunk_type!r}, 'time': {new_dec.time!r}}}"
             )
             return ReflectVerdict(
                 needs_retry=True, decision=new_dec, cause="zero",
