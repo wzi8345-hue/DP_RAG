@@ -487,10 +487,18 @@ class RetrievalSource(Protocol):
 
 ## 10. API 概览（/api/v1，统一 JWT 鉴权）
 
-### 10.0 API 约定（强制）
+### 10.0 API 约定（强制，已全量落地）
 
-- **业务接口统一用 `POST`**，参数走 JSON body（或 multipart 上传）；路径不再用 path-param 的 REST 风格，改为动词式路径（如 `/collections/list`、`/collections/delete`），body 携带 `name`/`id` 等。
-- **非 SSE 接口统一封装** `APIResponse`（`pipeline/api/models.py`）：
+- **业务接口一律用 `POST`**：参数走 JSON body（或 multipart 上传），**不使用 path-param / query 的 REST 风格**。路径为**动词式**，资源名/ID 放 body。例如：
+  - `GET /collections` → `POST /collections/list`
+  - `DELETE /collections/{name}` → `POST /collections/delete`（body `{name}`）
+  - `PATCH /collections/{name}/visibility` → `POST /collections/set-visibility`（body `{name, visibility}`）
+  - `GET /runs/{id}/status` → `POST /runs/status`（body `{run_id}`）
+  - 新端点也按此命名：`/<资源>/<动词>`（`list` / `get` / `create` / `save` / `delete` / `set-visibility` / `copy-to-mine` / `cancel` / `stream` …）。
+- **SSE 流式接口**（`/runs/stream`、`/ingest/tasks/stream`、`/logs/sessions/stream`）：**method 也是 `POST`**，参数走 JSON body（如 `{run_id, after_seq}`）；响应是 `text/event-stream`，**不走 `APIResponse` 封装**。前端用 `fetch + ReadableStream` 读取（不用 `EventSource`，以便带 `Authorization` 与请求体）。
+- **文件上传**（`POST /files/upload`、`POST /ingest/upload`）：`POST + multipart/form-data`，文件二进制 + 表单字段；这是文件上传的标准方式，不改为 JSON。
+- **唯一的 `GET` 例外**：运维探针 `GET /health`、`GET /stats` 保持 `GET`，供容器 `HEALTHCHECK`（`backend/Dockerfile` 用 `curl` GET `/api/v1/health`）与外部监控直接探测。**除这两个外，`/api/v1` 下不存在 GET/PATCH/DELETE 端点。**
+- **响应封装**：非 SSE 接口目标统一为 `APIResponse{code,data,msg}`（`pipeline/api/models.py`，含 `ok/fail` 助手）；现存端点部分仍直接返回具体 `response_model`，按需逐步收敛（此项与「方法/路径统一」是两个维度）。
 
   ```python
   class APIResponse(BaseModel, Generic[T]):
@@ -499,31 +507,29 @@ class RetrievalSource(Protocol):
       msg: str = ""
   ```
 
-- **SSE 流式接口**（`/chat/stream`、`/messages/stream`、日志流）不走该封装，仍是 `text/event-stream`。
-- **例外**：运维探针 `GET /health`、`GET /stats` 保持 `GET`（供容器 HEALTHCHECK / 监控），不算业务接口。
+> 偏好（固化）：**前后端 API 统一 POST + 动词式路径 + body 传参**；只有 `GET /health`、`GET /stats` 例外。新增端点必须遵循，前端只通过 `frontend/src/api/client.ts` 调用、签名不变只改实现。接口契约以运行时 OpenAPI（`/docs`、`/redoc`、`/openapi.json`）为准。
 
-> 落地策略：新增/重做的多用户端点（M4/M5）一律按本约定（POST + APIResponse）实现；现有继承端点的统一迁移见 DEV_PLAN「API 约定迁移」任务（需同步更新前端 client 与 `docs/后端协议文档.md`）。
+### 10.1 端点（全部 `POST`，除 `GET /health`、`GET /stats` 外）
 
-### 10.1 端点（POST + APIResponse，除标注外）
-
-| 分组 | 端点 | 说明 | 变化 |
-|------|------|------|------|
-| 对话 | `POST /chat/append` | 创建 user/assistant 占位消息 + `generation_runs`，入 Redis 队列并返回 `run_id` | 新增：生产级入口 |
-| 对话 | `GET /runs/{run_id}/stream`（SSE） | 先回放 Postgres `message_events`，再 tail Redis Stream 实时输出 | 新增：可重连/可回放 |
-| 对话 | `GET /runs/{run_id}/status` `POST /runs/{run_id}/stop` | 查询/停止 generation run | 新增 |
-| 对话 | `POST /chat` `POST /chat/stream` | 旧请求内生成入口 | 已禁用（410），统一走 run-based 架构 |
-| 对话 | `GET /conversations` `GET /conversations/{id}` `PATCH /conversations/{id}/visibility` | 会话列表/读取/可见性（过渡期兼容旧 REST；M9.6 统一 POST） | 新增 |
-| 对话 | `POST /conversations/append`（分叉重生成：`parent_message_id` / 编辑 user 文本） | 追加/分叉 | 新增 |
-| 对话 | `POST /conversations/share` `/conversations/unshare` `/conversations/shared/get` `/conversations/copy-to-mine` | 分享链接、撤销、公开只读读取、复制为个人副本 | 新增 |
-| 对话 | `POST /messages/stop`（body `message_id`） | 停止后台生成（不依赖前端连接） | 新增 |
-| 对话 | `GET /messages/{id}/stream`（SSE） | 重连续读正在生成消息的增量 | 新增 |
-| 文献 | `GET /collections` `POST /collections` `DELETE /collections/{name}` `POST /collections/{name}/rebuild` `PATCH /collections/{name}/visibility` | 文献库 CRUD + 归属/可见性（M9.6 统一 POST） | 改造 |
-| 文献 | `POST /ingest/upload`（multipart） | submit-only：保存 PDF/对象存储、创建 `ingest_tasks/items`、入 Redis 队列，立即返回 `task_id` | 改造 |
-| 文献 | `GET /ingest/tasks/{task_id}` `GET /ingest/tasks/{task_id}/stream` `POST /ingest/tasks/{task_id}/cancel` | 解析入库任务状态、事件流回放/实时输出、取消 | 新增 |
-| 文献 | `GET /collections/{name}/documents` `DELETE /collections/{name}/documents/{doc_id}` `POST /documents/pdf-url` `POST /collections/copy-to-mine` | 文献增删查、PDF 预签名、复制到个人 | 改造/新增 |
-| 技能 | `GET /skills` `POST /skills` `DELETE /skills/{id}` `PATCH /skills/{id}/visibility` `POST /skills/copy-to-mine` `/skills/template` | skill CRUD + 可见性 + 复制到个人（M9.6 统一 POST） | 改造 |
-| 管理 | `GET /admin/me` `/admin/resources/*` `/admin/audit-logs` | org admin/root 查看管理范围内资源与审计日志；普通资源列表不混入管理视图 | 新增 |
-| 运维 | `GET /health` `GET /stats` `GET /logs/sessions*`；`GET /doc_summary` | health 可作探针；stats/logs 需 admin/root；doc_summary 需文献读权限 | 保留/改造 |
+| 分组 | 端点 | 说明 |
+|------|------|------|
+| 查询 | `POST /query` | 单次检索 + 生成 |
+| 对话 | `POST /chat/append` | 创建 user/assistant 占位消息 + `generation_runs`，入 Redis 队列并返回 `run_id`（生产级入口） |
+| 对话 | `POST /runs/stream`（SSE，body `{run_id, after_seq}`） | 先回放 Postgres `message_events`，再 tail Redis Stream 实时输出；可重连/可回放 |
+| 对话 | `POST /runs/status` `POST /runs/stop`（body `{run_id}`） | 查询/停止 generation run |
+| 对话 | `POST /chat` `POST /chat/stream` | 旧请求内生成入口，已禁用（410），统一走 run-based 架构 |
+| 对话 | `POST /conversations/list` `POST /conversations/get`（body `{conversation_id}`）`POST /conversations/set-visibility`（body `{conversation_id, visibility}`） | 会话列表/读取/可见性 |
+| 对话 | `POST /conversations/share` `/conversations/unshare` `/conversations/shared/get` `/conversations/copy-to-mine` | 分享链接、撤销、公开只读读取、复制为个人副本 |
+| 会话 | `POST /sessions/create` `POST /sessions/delete`（body `{session_id}`） | 会话存储（legacy） |
+| 文献 | `POST /collections/list` `POST /collections/create` `POST /collections/delete` `POST /collections/rebuild` `POST /collections/set-visibility` | 文献库 CRUD + 归属/可见性（name/visibility 走 body） |
+| 文献 | `POST /collections/documents`（body `{name}`）`POST /collections/documents/delete`（body `{name, doc_id}`）`POST /collections/copy-to-mine` `POST /documents/pdf-url` | 文献增删查、复制到个人、PDF 预签名 |
+| 文献 | `POST /files/upload`（multipart）`POST /ingest/upload`（multipart） | 文件上传 / 上传即灌入（submit-only：保存对象存储、建任务、入队，返回 `task_id`） |
+| 文献 | `POST /ingest/rebuild` `/ingest/append` `/ingest/parse` `/ingest/load-vec` | 灌入任务（异步） |
+| 文献 | `POST /tasks/get` `POST /ingest/tasks/get` `POST /ingest/tasks/cancel`（body `{task_id}`）`POST /ingest/tasks/stream`（SSE，body `{task_id, after_seq}`） | 任务状态、取消、事件流回放/实时输出 |
+| 技能 | `POST /skills/list` `POST /skills/template` `POST /skills/save` `POST /skills/delete`（body `{skill_id}`）`POST /skills/set-visibility`（body `{skill_id, visibility}`）`POST /skills/copy-to-mine` | skill CRUD + 可见性 + 复制到个人 |
+| 管理 | `POST /admin/me` `POST /admin/resources/*` `POST /admin/audit-logs` | org admin/root 查看管理范围内资源与审计日志；带 ID 的走 body（`/admin/resources/collection-documents`、`/admin/resources/conversation`） |
+| 运维 | `POST /doc_summary`（body `{doc_id}`）`POST /logs/sessions/list` `POST /logs/sessions/get` `POST /logs/sessions/stream`（SSE） | doc_summary 需文献读权限；logs 需 admin/root |
+| 运维（GET 例外） | `GET /health` `GET /stats` | health 供容器探针/监控；stats 需 admin/root |
 
 ### 10.2 SSE 事件协议（保持兼容并扩展）
 
@@ -591,7 +597,7 @@ Logto: auth.dplink.cc (OIDC + JWKS)
 ```
 
 - 前端构建为静态站点，`base` 与路由需适配自定义域（`rag.hal9k.one`，SPA history 模式 + 404 fallback）。
-- 后端 CORS 允许 `https://rag.hal9k.one` 与本地 `http://localhost:9527`。
+- 后端 CORS 由环境变量 `CORS_ORIGINS` 配置（逗号分隔的前端 Origin；生产需包含 `https://rag.hal9k.one`，本地 dev 含 `http://localhost:9527`）。见 [`deploy/.env.example`](./deploy/.env.example)。
 - `VITE_API_BASE` 默认 `https://funmg.dp.tech/sci-loop-api`，本地用 Vite proxy。
 - FastAPI Web、generation worker、ingest worker 使用同一后端镜像但独立服务进程：Web 不执行模型生成或解析入库长任务，worker 不暴露公网 HTTP。
 
@@ -612,7 +618,7 @@ GitHub Actions：
 
 见 [`deploy/.env.example`](./deploy/.env.example)。要点：
 
-- **后端服务/鉴权/存储**：`DATABASE_URL`、`LOGTO_ISSUER`、`LOGTO_JWKS_URI`、`LOGTO_AUDIENCE`、`LOGTO_REQUIRED_SCOPE`、`AUTH_DISABLED`、`CORS_ORIGINS`、`API_ROOT_PATH`、`UPLOAD_DIR`、`SESSION_DIR`、`FRONTEND_BASE_URL`。
+- **后端服务/鉴权/存储**：`DATABASE_URL`、`LOGTO_ISSUER`、`LOGTO_JWKS_URI`、`LOGTO_AUDIENCE`、`LOGTO_REQUIRED_SCOPE`、`AUTH_DISABLED`、`CORS_ORIGINS`（必填，逗号分隔前端 Origin）、`API_ROOT_PATH`、`UPLOAD_DIR`、`SESSION_DIR`、`FRONTEND_BASE_URL`。
 - **对象存储（RustFS/S3）**：`OBJECT_STORE_ENDPOINT`、`OBJECT_STORE_PUBLIC_ENDPOINT`、`OBJECT_STORE_ACCESS_KEY`、`OBJECT_STORE_SECRET_KEY`、`OBJECT_STORE_BUCKET`、`OBJECT_STORE_REGION`。
 - **Redis（生产级对话/入库运行）**：`REDIS_URL`、`REDIS_RUN_QUEUE`、`REDIS_RUN_STREAM_PREFIX`、`REDIS_RUN_STREAM_MAXLEN`、`REDIS_RUN_STREAM_TTL`、`REDIS_INGEST_QUEUE`、`REDIS_INGEST_STREAM_PREFIX`、`REDIS_INGEST_STREAM_MAXLEN`、`REDIS_INGEST_STREAM_TTL`。
 - **基建连接（pipeline，容器化的主要配置方式）**：通过环境变量覆盖 pipeline 配置，**镜像无需挂载 YAML**。加载优先级：`default_config.yaml < CONFIG_PATH 文件 < 环境变量 < 运行时`。映射表见 `backend/pipeline/config.py` 的 `_ENV_OVERRIDES`：

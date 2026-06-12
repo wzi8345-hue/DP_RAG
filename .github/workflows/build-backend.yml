@@ -2,7 +2,7 @@ name: Build & push backend image
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, deploy, dev]
     paths:
       - 'backend/**'
       - '.github/workflows/build-backend.yml'
@@ -39,7 +39,6 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE }}:sci-loop_backend_latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

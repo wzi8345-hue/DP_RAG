@@ -95,17 +95,20 @@ def create_app() -> FastAPI:
         root_path=root_path or "",
     )
 
-    # CORS: 前端跨域。带凭证时不能用 "*"; 显式来源才允许 credentials。
-    _default_origins = "https://rag.hal9k.one,http://localhost:9527"
-    origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", _default_origins).split(",") if o.strip()]
+    # CORS: 由环境变量 CORS_ORIGINS 配置（逗号分隔）。带凭证时不能用 "*"。
+    raw_origins = os.environ.get("CORS_ORIGINS", "").strip()
+    origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
+    if not origins:
+        logger.warning("CORS_ORIGINS 未设置，浏览器跨域请求将被拒绝")
     allow_credentials = origins != ["*"]
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins or ["*"],
-        allow_credentials=allow_credentials,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    if origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=allow_credentials,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     # 注册路由
     from .routers import admin, chat, collections, conversations, files, ingest, query, skills

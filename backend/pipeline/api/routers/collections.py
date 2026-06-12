@@ -38,14 +38,17 @@ from ..authz import (
 )
 from ..deps import AuthContext, get_pipeline, get_task_store, require_auth
 from ..models import (
+    CollectionDocumentRequest,
     CollectionInfo,
+    CollectionNameRequest,
     CollectionsListResponse,
+    CollectionVisibilityRequest,
     CreateCollectionRequest,
     DeleteCollectionResponse,
+    ListCollectionsRequest,
     ResourceCopyRequest,
     ResourceCopyResponse,
     TaskResponse,
-    VisibilityRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -199,9 +202,9 @@ def _list_disk_kbs(prefix: str) -> list[str]:
     ]
 
 
-@router.get("/collections", response_model=CollectionsListResponse)
+@router.post("/collections/list", response_model=CollectionsListResponse)
 def list_collections(
-    prefix: str = _KB_PREFIX,
+    req: ListCollectionsRequest | None = None,
     auth: AuthContext = Depends(require_auth),
 ) -> CollectionsListResponse:
     """列出当前用户可读的业务知识库。Milvus 物理 collection 不参与业务列表。"""
@@ -226,7 +229,7 @@ def list_collections(
     return CollectionsListResponse(collections=collections)
 
 
-@router.post("/collections", response_model=CollectionInfo)
+@router.post("/collections/create", response_model=CollectionInfo)
 def create_collection(
     req: CreateCollectionRequest,
     auth: AuthContext = Depends(require_auth),
@@ -264,12 +267,13 @@ def create_collection(
     )
 
 
-@router.delete("/collections/{name}", response_model=DeleteCollectionResponse)
+@router.post("/collections/delete", response_model=DeleteCollectionResponse)
 def delete_collection(
-    name: str,
+    req: CollectionNameRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> DeleteCollectionResponse:
     """删除一个知识库: 删 Milvus 集合 + 连带清理本地工作目录 (中间产物/原始 PDF)。"""
+    name = req.name
     if not name.startswith(_KB_PREFIX):
         raise HTTPException(
             status_code=400,
@@ -337,9 +341,9 @@ def _rebuild_collection(task_id: str, collection: str, directory: str) -> dict[s
     }
 
 
-@router.post("/collections/{name}/rebuild", response_model=TaskResponse)
+@router.post("/collections/rebuild", response_model=TaskResponse)
 def rebuild_collection(
-    name: str,
+    req: CollectionNameRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> TaskResponse:
     """重建知识库 (异步): 复用本地已落盘的向量, 清空集合后逐字节重灌。
@@ -347,6 +351,7 @@ def rebuild_collection(
     默认复用 knowledge_blocks_vec.json, 不重新 chunk / embed, 因此重灌结果与首次
     入库一致, 且不依赖 embedding 服务在线; 缺 vec.json 的文档回退完整向量化。
     """
+    name = req.name
     if not name.startswith(_KB_PREFIX):
         raise HTTPException(status_code=400, detail=f"仅允许重建 {_KB_PREFIX} 前缀的集合")
     if repo.available():
@@ -366,14 +371,14 @@ def rebuild_collection(
     return TaskResponse(id=tid, status="pending", created_at=time.time())
 
 
-@router.patch("/collections/{name}/visibility")
+@router.post("/collections/set-visibility")
 def set_collection_visibility(
-    name: str,
-    req: VisibilityRequest,
+    req: CollectionVisibilityRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> dict:
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    name = req.name
     require_visibility_allowed(auth, req.visibility)
     meta = repo.get_collection(name)
     if meta is None:
@@ -394,11 +399,12 @@ def set_collection_visibility(
     return {"updated": True, "name": name, "visibility": updated.visibility}
 
 
-@router.get("/collections/{name}/documents")
+@router.post("/collections/documents")
 def list_collection_documents(
-    name: str,
+    req: CollectionNameRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> dict:
+    name = req.name
     if not repo.available():
         return {"documents": []}
     meta = repo.get_collection(name)
@@ -409,12 +415,13 @@ def list_collection_documents(
     return {"documents": [d.model_dump(mode="json") for d in docs]}
 
 
-@router.delete("/collections/{name}/documents/{doc_id}")
+@router.post("/collections/documents/delete")
 def delete_collection_document(
-    name: str,
-    doc_id: str,
+    req: CollectionDocumentRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> dict:
+    name = req.name
+    doc_id = req.doc_id
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
     meta = repo.get_collection(name)

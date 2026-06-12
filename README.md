@@ -61,6 +61,18 @@ pnpm dev          # http://localhost:9527 （与 Logto 重定向 URI 一致）
 
 本地默认把 `/api` 代理到 `http://localhost:8080`。详见 [`frontend/README.md`](./frontend/README.md)。
 
+### 后端 API
+
+所有业务接口挂载在 `/api/v1` 前缀下，统一返回 `APIResponse{code,data,msg}`；流式问答与日志走 SSE（`text/event-stream`），运维探针 `GET /health`、`GET /stats` 为例外。请求需携带 Logto 签发的 JWT：`Authorization: Bearer <access_token>`。
+
+接口契约以服务运行时的 OpenAPI 为准（源真相），启动后端后访问：
+
+- Swagger UI：`/docs`
+- ReDoc：`/redoc`
+- OpenAPI JSON：`/openapi.json`
+
+端点分组与约定详见 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §10。
+
 ### 部署（docker-compose）
 
 ```bash
@@ -106,7 +118,8 @@ GitHub Actions（`.github/workflows/`）：
 
 ## 文档
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md)、[`DEV_PLAN.md`](./DEV_PLAN.md)
-- [`docs/后端协议文档.md`](docs/后端协议文档.md)、[`docs/功能描述文档.md`](docs/功能描述文档.md)
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md)、[`DEV_PLAN.md`](./DEV_PLAN.md) — 源真相文档（架构、数据模型、鉴权、部署、API 约定与端点）
+- [`deploy/.env.example`](./deploy/.env.example) — 部署环境变量说明
+- 后端 API 契约：运行后端后看 `/docs`、`/redoc`、`/openapi.json`（OpenAPI 自动生成，始终与代码一致）
 
 > ⚠️ 请勿将真实 API Key / 密码提交到仓库，统一通过环境变量 / secrets 注入。

@@ -2,7 +2,7 @@ name: Build & push frontend image
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, deploy, dev]
     paths:
       - 'frontend/**'
       - '.github/workflows/build-frontend.yml'
@@ -45,7 +45,6 @@ jobs:
             VITE_LOGTO_SCOPES=all:data,email,profile
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE }}:sci-loop_frontend_latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

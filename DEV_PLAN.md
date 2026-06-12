@@ -103,10 +103,10 @@
 - ☑ #9.4 **APIResponse** 统一封装模型 + `ok/fail` 助手（`pipeline/api/models.py`）
 - ☑ #9.5 后端 Dockerfile 改用 uv（`uv sync`）
 - ☑ #9.8 pipeline 基建连接支持**环境变量覆盖**（`_ENV_OVERRIDES`）；镜像无需挂载 YAML，compose 注入连接变量
-- ☐ #9.6 **API 约定迁移**：现有继承端点统一为 POST + APIResponse（动词式路径），同步更新前端 `api/client.ts`/类型与 `docs/后端协议文档.md`
+- ☑ #9.6 **API 方法/路径统一**：`/api/v1` 下业务接口全部改为 **POST + 动词式路径 + body 传参**（含 SSE：method=POST、响应 event-stream），仅 `GET /health`、`GET /stats` 保留 GET（容器探针/监控）；同步更新前端 `api/client.ts`（方法签名不变，只改实现）。约定见 ARCHITECTURE §10.0。响应体统一为 `APIResponse` 仍在逐步收敛（独立维度）。
 - ☐ #9.7 项目级 ruff `check --fix` + format 全量过一遍历史 pipeline 代码
 
-> 约定（强制，见 ARCHITECTURE §10.0）：业务接口统一 POST + `APIResponse{code,data,msg}`；SSE 与运维探针（GET /health、/stats）为例外。新增/重做端点（M4/M5）即按此实现。
+> 约定（强制，见 ARCHITECTURE §10.0）：业务接口统一 **POST + 动词式路径 + body 传参**（SSE 也用 POST，响应为 event-stream）；唯一 GET 例外是运维探针 `GET /health`、`GET /stats`。响应体目标统一 `APIResponse{code,data,msg}`（逐步收敛）。新增端点必须遵循。
 
 ### M8 · 部署 + CI
 - ☑ #8.1 `backend/Dockerfile`

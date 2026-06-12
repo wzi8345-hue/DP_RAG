@@ -247,10 +247,6 @@ class CreateCollectionRequest(BaseModel):
     visibility: Visibility = "private"
 
 
-class VisibilityRequest(BaseModel):
-    visibility: Visibility
-
-
 class DeleteCollectionResponse(BaseModel):
     deleted: bool
     name: str
@@ -399,3 +395,95 @@ class ResourceCopyRequest(BaseModel):
 class ResourceCopyResponse(BaseModel):
     id: str
     name: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# POST 化补充请求模型
+#
+# API 约定（强制，见 ARCHITECTURE §10.0）：业务接口统一 POST + 动词式路径，
+# 参数走 JSON body（或 multipart 上传）。下列模型承载原先用 path-param / query
+# 传递的参数，使其改由 body 传入。
+# ---------------------------------------------------------------------------
+
+
+class ListCollectionsRequest(BaseModel):
+    prefix: str = "kb_"
+
+
+class CollectionNameRequest(BaseModel):
+    name: str
+
+
+class CollectionVisibilityRequest(BaseModel):
+    name: str
+    visibility: Visibility
+
+
+class CollectionDocumentRequest(BaseModel):
+    name: str
+    doc_id: str
+
+
+class TaskIdRequest(BaseModel):
+    task_id: str
+
+
+class StreamTaskRequest(BaseModel):
+    task_id: str
+    after_seq: int = 0
+
+
+class SkillIdRequest(BaseModel):
+    skill_id: str
+
+
+class SkillVisibilityRequest(BaseModel):
+    skill_id: str
+    visibility: Visibility
+
+
+class ConversationIdRequest(BaseModel):
+    conversation_id: str
+
+
+class ConversationVisibilityRequest(BaseModel):
+    conversation_id: str
+    visibility: Visibility
+
+
+class RunIdRequest(BaseModel):
+    run_id: str
+
+
+class StreamRunRequest(BaseModel):
+    run_id: str
+    after_seq: int = 0
+
+
+class DocIdRequest(BaseModel):
+    doc_id: str
+
+
+class SessionIdRequest(BaseModel):
+    session_id: str
+
+
+class AdminListRequest(BaseModel):
+    limit: int = 200
+
+
+class AdminCollectionDocsRequest(BaseModel):
+    name: str
+
+
+class AdminConversationRequest(BaseModel):
+    conversation_id: str
+
+
+class LogSessionGetRequest(BaseModel):
+    session_id: str
+    tail: int | None = None
+
+
+class LogSessionStreamRequest(BaseModel):
+    session_id: str

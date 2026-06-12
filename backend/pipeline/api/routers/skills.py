@@ -18,11 +18,12 @@ from ..models import (
     ResourceCopyRequest,
     ResourceCopyResponse,
     SkillDeleteResponse,
+    SkillIdRequest,
     SkillListResponse,
     SkillSaveResponse,
     SkillSpec,
     SkillSummary,
-    VisibilityRequest,
+    SkillVisibilityRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ def _skills_cfg(pipe):
     return resolve_skills_config(prof.get("skills", {}) or {})
 
 
-@router.get("/skills", response_model=SkillListResponse)
+@router.post("/skills/list", response_model=SkillListResponse)
 def list_skills(auth: AuthContext = Depends(require_auth)) -> SkillListResponse:
     """列出所有已加载的 skill (内置 + 用户), 含可编辑提示词正文。"""
     from ...routing.research_skills import load_skills, skill_to_summary
@@ -86,7 +87,7 @@ def list_skills(auth: AuthContext = Depends(require_auth)) -> SkillListResponse:
     )
 
 
-@router.get("/skills/template")
+@router.post("/skills/template")
 def get_skill_template(_auth: str = Depends(require_auth)) -> dict:
     """返回新建 skill 的填写模版 (字段说明 + 示例)。"""
     from ...routing.research_skills import skill_template
@@ -94,7 +95,7 @@ def get_skill_template(_auth: str = Depends(require_auth)) -> dict:
     return skill_template()
 
 
-@router.post("/skills", response_model=SkillSaveResponse)
+@router.post("/skills/save", response_model=SkillSaveResponse)
 def save_skill(spec: SkillSpec, auth: AuthContext = Depends(require_auth)) -> SkillSaveResponse:
     """新建或覆盖一个用户 skill (写入 upload_dir), 并触发研究 agent 重载。"""
     from ...routing.research_skills import (
@@ -145,11 +146,12 @@ def save_skill(spec: SkillSpec, auth: AuthContext = Depends(require_auth)) -> Sk
     return SkillSaveResponse(saved=True, id=saved.id, skill=summary)
 
 
-@router.delete("/skills/{skill_id}", response_model=SkillDeleteResponse)
-def remove_skill(skill_id: str, _auth: AuthContext = Depends(require_auth)) -> SkillDeleteResponse:
+@router.post("/skills/delete", response_model=SkillDeleteResponse)
+def remove_skill(req: SkillIdRequest, _auth: AuthContext = Depends(require_auth)) -> SkillDeleteResponse:
     """删除一个用户 skill (仅限 upload_dir; 内置 skill 不可删)。"""
     from ...routing.research_skills import delete_skill
 
+    skill_id = req.skill_id
     auth = _auth
     pipe = get_pipeline()
     cfg = _skills_cfg(pipe)
@@ -184,14 +186,14 @@ def remove_skill(skill_id: str, _auth: AuthContext = Depends(require_auth)) -> S
     return SkillDeleteResponse(deleted=True, id=skill_id)
 
 
-@router.patch("/skills/{skill_id}/visibility")
+@router.post("/skills/set-visibility")
 def set_skill_visibility(
-    skill_id: str,
-    req: VisibilityRequest,
+    req: SkillVisibilityRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> dict:
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    skill_id = req.skill_id
     require_visibility_allowed(auth, req.visibility)
     meta = repo.find_manageable_skill(skill_id, auth)
     if meta is None:

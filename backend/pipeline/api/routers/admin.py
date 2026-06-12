@@ -6,18 +6,24 @@ import json
 import logging
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from ...db import repo
 from ..authz import require_read
 from ..deps import AuthContext, require_auth
 from ..models import (
+    AdminCollectionDocsRequest,
+    AdminConversationRequest,
+    AdminListRequest,
+    DocIdRequest,
     DocSummaryResponse,
     HealthResponse,
     LogLineEntry,
     LogSessionDetail,
+    LogSessionGetRequest,
     LogSessionListResponse,
+    LogSessionStreamRequest,
     LogSessionSummary,
     StatsResponse,
 )
@@ -106,12 +112,13 @@ def _esc(v: str) -> str:
     return str(v).replace('"', '\\"')
 
 
-@router.get("/doc_summary", response_model=DocSummaryResponse)
-def doc_summary(doc_id: str, auth: AuthContext = Depends(require_auth)) -> DocSummaryResponse:
+@router.post("/doc_summary", response_model=DocSummaryResponse)
+def doc_summary(req: DocIdRequest, auth: AuthContext = Depends(require_auth)) -> DocSummaryResponse:
     """按 doc_id 返回该文献的简介 (summary 摘要块), 供前端角标点击展示。
 
     优先取 type=summary 块; 缺失时回退到 title / 首个 text 块。
     """
+    doc_id = req.doc_id
     if repo.available():
         doc = repo.find_document_by_doc_id(doc_id, auth)
         if doc is None:
@@ -265,7 +272,7 @@ def health() -> HealthResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/admin/me")
+@router.post("/admin/me")
 def admin_me(auth: AuthContext = Depends(require_auth)) -> dict:
     return {
         "user_id": auth.user_id,
@@ -278,7 +285,7 @@ def admin_me(auth: AuthContext = Depends(require_auth)) -> dict:
     }
 
 
-@router.get("/admin/resources/collections")
+@router.post("/admin/resources/collections")
 def admin_collections(auth: AuthContext = Depends(require_auth)) -> dict:
     _require_admin_console(auth)
     if not repo.available():
@@ -309,8 +316,9 @@ def admin_collections(auth: AuthContext = Depends(require_auth)) -> dict:
     return {"collections": collections}
 
 
-@router.get("/admin/resources/collections/{name}/documents")
-def admin_collection_documents(name: str, auth: AuthContext = Depends(require_auth)) -> dict:
+@router.post("/admin/resources/collection-documents")
+def admin_collection_documents(req: AdminCollectionDocsRequest, auth: AuthContext = Depends(require_auth)) -> dict:
+    name = req.name
     _require_admin_console(auth)
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
@@ -331,7 +339,7 @@ def admin_collection_documents(name: str, auth: AuthContext = Depends(require_au
     return {"documents": [d.model_dump(mode="json") for d in docs]}
 
 
-@router.get("/admin/resources/conversations")
+@router.post("/admin/resources/conversations")
 def admin_conversations(auth: AuthContext = Depends(require_auth)) -> dict:
     _require_admin_console(auth)
     if not repo.available():
@@ -347,8 +355,9 @@ def admin_conversations(auth: AuthContext = Depends(require_auth)) -> dict:
     return {"conversations": conversations}
 
 
-@router.get("/admin/resources/conversations/{conversation_id}")
-def admin_conversation(conversation_id: str, auth: AuthContext = Depends(require_auth)) -> dict:
+@router.post("/admin/resources/conversation")
+def admin_conversation(req: AdminConversationRequest, auth: AuthContext = Depends(require_auth)) -> dict:
+    conversation_id = req.conversation_id
     _require_admin_console(auth)
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
@@ -367,7 +376,7 @@ def admin_conversation(conversation_id: str, auth: AuthContext = Depends(require
     return {"conversation": _conversation_payload(conv, include_messages=True)}
 
 
-@router.get("/admin/resources/skills")
+@router.post("/admin/resources/skills")
 def admin_skills(auth: AuthContext = Depends(require_auth)) -> dict:
     _require_admin_console(auth)
     if not repo.available():
@@ -383,8 +392,12 @@ def admin_skills(auth: AuthContext = Depends(require_auth)) -> dict:
     return {"skills": skills}
 
 
-@router.get("/admin/resources/ingest-tasks")
-def admin_ingest_tasks(auth: AuthContext = Depends(require_auth), limit: int = 200) -> dict:
+@router.post("/admin/resources/ingest-tasks")
+def admin_ingest_tasks(
+    req: AdminListRequest | None = None,
+    auth: AuthContext = Depends(require_auth),
+) -> dict:
+    limit = req.limit if req else 200
     _require_admin_console(auth)
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
@@ -399,8 +412,12 @@ def admin_ingest_tasks(auth: AuthContext = Depends(require_auth), limit: int = 2
     return {"tasks": tasks}
 
 
-@router.get("/admin/resources/generation-runs")
-def admin_generation_runs(auth: AuthContext = Depends(require_auth), limit: int = 200) -> dict:
+@router.post("/admin/resources/generation-runs")
+def admin_generation_runs(
+    req: AdminListRequest | None = None,
+    auth: AuthContext = Depends(require_auth),
+) -> dict:
+    limit = req.limit if req else 200
     _require_admin_console(auth)
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
@@ -415,8 +432,12 @@ def admin_generation_runs(auth: AuthContext = Depends(require_auth), limit: int 
     return {"runs": runs}
 
 
-@router.get("/admin/audit-logs")
-def admin_audit_logs(auth: AuthContext = Depends(require_auth), limit: int = 200) -> dict:
+@router.post("/admin/audit-logs")
+def admin_audit_logs(
+    req: AdminListRequest | None = None,
+    auth: AuthContext = Depends(require_auth),
+) -> dict:
+    limit = req.limit if req else 200
     _require_admin_console(auth)
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
@@ -429,7 +450,7 @@ def admin_audit_logs(auth: AuthContext = Depends(require_auth), limit: int = 200
 # ---------------------------------------------------------------------------
 
 
-@router.get("/logs/sessions", response_model=LogSessionListResponse)
+@router.post("/logs/sessions/list", response_model=LogSessionListResponse)
 def list_log_sessions(auth: AuthContext = Depends(require_auth)) -> LogSessionListResponse:
     """返回有日志的 session 列表, 按最后更新时间倒序。"""
     _require_admin_console(auth)
@@ -440,13 +461,14 @@ def list_log_sessions(auth: AuthContext = Depends(require_auth)) -> LogSessionLi
     )
 
 
-@router.get("/logs/sessions/{session_id}", response_model=LogSessionDetail)
+@router.post("/logs/sessions/get", response_model=LogSessionDetail)
 def get_log_session(
-    session_id: str,
-    tail: int | None = Query(None, description="仅返回最后 N 行"),
+    req: LogSessionGetRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> LogSessionDetail:
     """返回指定 session 的检索流程日志。"""
+    session_id = req.session_id
+    tail = req.tail
     _require_admin_console(auth)
     handler = get_session_log_handler()
     detail = handler.get_session(session_id, tail=tail)
@@ -471,12 +493,13 @@ def get_log_session(
     )
 
 
-@router.get("/logs/sessions/{session_id}/stream")
+@router.post("/logs/sessions/stream")
 async def stream_log_session(
-    session_id: str,
+    req: LogSessionStreamRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> StreamingResponse:
     """SSE 实时推送指定 session 的新日志行。"""
+    session_id = req.session_id
     _require_admin_console(auth)
 
     async def event_generator():

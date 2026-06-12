@@ -21,7 +21,10 @@ from ..models import (
     ChatAppendResponse,
     ChatRequest,
     ChatResponse,
+    RunIdRequest,
     RunStatusResponse,
+    SessionIdRequest,
+    StreamRunRequest,
 )
 from ..session_logger import clear_session_log_context, set_session_log_context
 
@@ -240,11 +243,12 @@ async def append_chat_run(
     )
 
 
-@router.get("/runs/{run_id}/status", response_model=RunStatusResponse)
+@router.post("/runs/status", response_model=RunStatusResponse)
 def get_run_status(
-    run_id: str,
+    req: RunIdRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> RunStatusResponse:
+    run_id = req.run_id
     run = _require_run_owner(run_id, auth)
     if run.owner_id != auth.user_id:
         repo.append_audit_log(
@@ -265,11 +269,12 @@ def get_run_status(
     )
 
 
-@router.post("/runs/{run_id}/stop", response_model=RunStatusResponse)
+@router.post("/runs/stop", response_model=RunStatusResponse)
 def stop_run(
-    run_id: str,
+    req: RunIdRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> RunStatusResponse:
+    run_id = req.run_id
     existing = _require_run_owner(run_id, auth)
     require_manage(auth, existing)
     run = repo.request_generation_run_stop(run_id)
@@ -300,13 +305,14 @@ def stop_run(
     )
 
 
-@router.get("/runs/{run_id}/stream")
+@router.post("/runs/stream")
 def stream_run(
-    run_id: str,
-    after_seq: int = 0,
+    req: StreamRunRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> StreamingResponse:
     """SSE: replay durable message_events, then tail Redis stream for live events."""
+    run_id = req.run_id
+    after_seq = req.after_seq
     run = _require_run_owner(run_id, auth)
     if run.owner_id != auth.user_id:
         repo.append_audit_log(
@@ -573,7 +579,7 @@ async def chat_stream(
     )
 
 
-@router.post("/sessions", response_model=dict)
+@router.post("/sessions/create", response_model=dict)
 def create_session(
     _auth: str = Depends(require_auth),
 ) -> dict:
@@ -583,12 +589,12 @@ def create_session(
     return {"session_id": sid}
 
 
-@router.delete("/sessions/{session_id}")
+@router.post("/sessions/delete")
 def delete_session(
-    session_id: str,
+    req: SessionIdRequest,
     _auth: str = Depends(require_auth),
 ) -> dict:
     """销毁对话会话。"""
     store = get_session_store()
-    ok = store.delete(session_id)
+    ok = store.delete(req.session_id)
     return {"deleted": ok}

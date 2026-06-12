@@ -23,6 +23,8 @@ from ..models import (
     IngestTaskResponse,
     LoadVecRequest,
     ParseRequest,
+    StreamTaskRequest,
+    TaskIdRequest,
     TaskResponse,
 )
 from .collections import (
@@ -231,12 +233,13 @@ def ingest_load_vec(
     return TaskResponse(id=tid, status="pending", created_at=_time.time())
 
 
-@router.get("/tasks/{task_id}", response_model=TaskResponse)
+@router.post("/tasks/get", response_model=TaskResponse)
 def get_task(
-    task_id: str,
+    req: TaskIdRequest,
     _auth: str = Depends(require_auth),
 ) -> TaskResponse:
     """查询异步任务状态。"""
+    task_id = req.task_id
     if repo.available():
         task = repo.get_ingest_task(task_id)
         if task is not None:
@@ -263,11 +266,12 @@ def get_task(
     )
 
 
-@router.get("/ingest/tasks/{task_id}", response_model=IngestTaskResponse)
+@router.post("/ingest/tasks/get", response_model=IngestTaskResponse)
 def get_ingest_task(
-    task_id: str,
+    req: TaskIdRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> IngestTaskResponse:
+    task_id = req.task_id
     task = repo.get_ingest_task(task_id) if repo.available() else None
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -283,11 +287,12 @@ def get_ingest_task(
     return _ingest_task_payload(task_id)
 
 
-@router.post("/ingest/tasks/{task_id}/cancel", response_model=IngestTaskResponse)
+@router.post("/ingest/tasks/cancel", response_model=IngestTaskResponse)
 def cancel_ingest_task(
-    task_id: str,
+    req: TaskIdRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> IngestTaskResponse:
+    task_id = req.task_id
     task = repo.get_ingest_task(task_id) if repo.available() else None
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -309,12 +314,13 @@ def cancel_ingest_task(
     return _ingest_task_payload(task_id)
 
 
-@router.get("/ingest/tasks/{task_id}/stream")
+@router.post("/ingest/tasks/stream")
 def stream_ingest_task(
-    task_id: str,
-    after_seq: int = 0,
+    req: StreamTaskRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> StreamingResponse:
+    task_id = req.task_id
+    after_seq = req.after_seq
     task = repo.get_ingest_task(task_id) if repo.available() else None
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")

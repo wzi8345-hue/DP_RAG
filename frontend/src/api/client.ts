@@ -74,52 +74,56 @@ export class ApiClient {
 
   async docSummary(docId: string): Promise<DocSummaryResponse> {
     return handle(
-      await fetch(this.url(`/doc_summary?doc_id=${encodeURIComponent(docId)}`), {
-        headers: await this.headers(false),
+      await fetch(this.url('/doc_summary'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ doc_id: docId }),
       }),
     )
   }
 
   async adminMe(): Promise<AdminMeResponse> {
-    return handle(await fetch(this.url('/admin/me'), { headers: await this.headers(false) }))
+    return handle(await fetch(this.url('/admin/me'), { method: 'POST', headers: await this.headers(false) }))
   }
 
   async adminCollections(): Promise<AdminResourcesResponse> {
-    return handle(await fetch(this.url('/admin/resources/collections'), { headers: await this.headers(false) }))
+    return handle(await fetch(this.url('/admin/resources/collections'), { method: 'POST', headers: await this.headers(false) }))
   }
 
   async adminConversations(): Promise<AdminResourcesResponse> {
-    return handle(await fetch(this.url('/admin/resources/conversations'), { headers: await this.headers(false) }))
+    return handle(await fetch(this.url('/admin/resources/conversations'), { method: 'POST', headers: await this.headers(false) }))
   }
 
   async adminSkills(): Promise<AdminResourcesResponse> {
-    return handle(await fetch(this.url('/admin/resources/skills'), { headers: await this.headers(false) }))
+    return handle(await fetch(this.url('/admin/resources/skills'), { method: 'POST', headers: await this.headers(false) }))
   }
 
   async adminIngestTasks(): Promise<AdminResourcesResponse> {
-    return handle(await fetch(this.url('/admin/resources/ingest-tasks'), { headers: await this.headers(false) }))
+    return handle(await fetch(this.url('/admin/resources/ingest-tasks'), { method: 'POST', headers: await this.headers(false) }))
   }
 
   async adminGenerationRuns(): Promise<AdminResourcesResponse> {
-    return handle(await fetch(this.url('/admin/resources/generation-runs'), { headers: await this.headers(false) }))
+    return handle(await fetch(this.url('/admin/resources/generation-runs'), { method: 'POST', headers: await this.headers(false) }))
   }
 
   async adminAuditLogs(): Promise<AdminResourcesResponse> {
-    return handle(await fetch(this.url('/admin/audit-logs'), { headers: await this.headers(false) }))
+    return handle(await fetch(this.url('/admin/audit-logs'), { method: 'POST', headers: await this.headers(false) }))
   }
 
   // ── 知识库 / 文献 ───────────────────────────────────────
   async listCollections(prefix = 'kb_'): Promise<CollectionsListResponse> {
     return handle(
-      await fetch(this.url(`/collections?prefix=${encodeURIComponent(prefix)}`), {
-        headers: await this.headers(false),
+      await fetch(this.url('/collections/list'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ prefix }),
       }),
     )
   }
 
   async createCollection(name: string): Promise<CollectionInfo> {
     return handle(
-      await fetch(this.url('/collections'), {
+      await fetch(this.url('/collections/create'), {
         method: 'POST',
         headers: await this.headers(),
         body: JSON.stringify({ name }),
@@ -129,28 +133,30 @@ export class ApiClient {
 
   async deleteCollection(name: string): Promise<{ deleted: boolean; name: string }> {
     return handle(
-      await fetch(this.url(`/collections/${encodeURIComponent(name)}`), {
-        method: 'DELETE',
-        headers: await this.headers(false),
+      await fetch(this.url('/collections/delete'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ name }),
       }),
     )
   }
 
   async rebuildCollection(name: string): Promise<TaskResponse> {
     return handle(
-      await fetch(this.url(`/collections/${encodeURIComponent(name)}/rebuild`), {
+      await fetch(this.url('/collections/rebuild'), {
         method: 'POST',
-        headers: await this.headers(false),
+        headers: await this.headers(),
+        body: JSON.stringify({ name }),
       }),
     )
   }
 
   /** 设置文献库可见性（后端 M5；当前若 404 调用方降级处理）。 */
   async setCollectionVisibility(name: string, visibility: Visibility): Promise<void> {
-    const res = await fetch(this.url(`/collections/${encodeURIComponent(name)}/visibility`), {
-      method: 'PATCH',
+    const res = await fetch(this.url('/collections/set-visibility'), {
+      method: 'POST',
       headers: await this.headers(),
-      body: JSON.stringify({ visibility }),
+      body: JSON.stringify({ name, visibility }),
     })
     if (!res.ok) await handle(res)
   }
@@ -167,22 +173,22 @@ export class ApiClient {
 
   /** 列出某库下文献（后端 M5；当前后端可能未实现 → 调用方 try/catch 降级）。 */
   async listDocuments(collection: string): Promise<DocumentInfo[]> {
-    const res = await fetch(
-      this.url(`/collections/${encodeURIComponent(collection)}/documents`),
-      { headers: await this.headers(false) },
-    )
+    const res = await fetch(this.url('/collections/documents'), {
+      method: 'POST',
+      headers: await this.headers(),
+      body: JSON.stringify({ name: collection }),
+    })
     if (!res.ok) return []
     const data = (await res.json()) as { documents?: DocumentInfo[] }
     return data.documents ?? []
   }
 
   async deleteDocument(collection: string, docId: string): Promise<void> {
-    const res = await fetch(
-      this.url(
-        `/collections/${encodeURIComponent(collection)}/documents/${encodeURIComponent(docId)}`,
-      ),
-      { method: 'DELETE', headers: await this.headers(false) },
-    )
+    const res = await fetch(this.url('/collections/documents/delete'), {
+      method: 'POST',
+      headers: await this.headers(),
+      body: JSON.stringify({ name: collection, doc_id: docId }),
+    })
     if (!res.ok) await handle(res)
   }
 
@@ -220,14 +226,20 @@ export class ApiClient {
 
   async getTask(id: string): Promise<TaskResponse> {
     return handle(
-      await fetch(this.url(`/tasks/${id}`), { headers: await this.headers(false) }),
+      await fetch(this.url('/tasks/get'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ task_id: id }),
+      }),
     )
   }
 
   async getIngestTask(id: string): Promise<IngestTask> {
     return handle(
-      await fetch(this.url(`/ingest/tasks/${encodeURIComponent(id)}`), {
-        headers: await this.headers(false),
+      await fetch(this.url('/ingest/tasks/get'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ task_id: id }),
       }),
     )
   }
@@ -238,13 +250,12 @@ export class ApiClient {
     signal?: AbortSignal,
     afterSeq = 0,
   ): Promise<void> {
-    const res = await fetch(
-      this.url(`/ingest/tasks/${encodeURIComponent(id)}/stream?after_seq=${encodeURIComponent(afterSeq)}`),
-      {
-        headers: await this.headers(false),
-        signal,
-      },
-    )
+    const res = await fetch(this.url('/ingest/tasks/stream'), {
+      method: 'POST',
+      headers: await this.headers(),
+      body: JSON.stringify({ task_id: id, after_seq: afterSeq }),
+      signal,
+    })
     if (!res.ok || !res.body) {
       await handle(res)
       return
@@ -254,27 +265,28 @@ export class ApiClient {
 
   async cancelIngestTask(id: string): Promise<IngestTask> {
     return handle(
-      await fetch(this.url(`/ingest/tasks/${encodeURIComponent(id)}/cancel`), {
+      await fetch(this.url('/ingest/tasks/cancel'), {
         method: 'POST',
-        headers: await this.headers(false),
+        headers: await this.headers(),
+        body: JSON.stringify({ task_id: id }),
       }),
     )
   }
 
   // ── 技能 ────────────────────────────────────────────────
   async listSkills(): Promise<SkillListResponse> {
-    return handle(await fetch(this.url('/skills'), { headers: await this.headers(false) }))
+    return handle(await fetch(this.url('/skills/list'), { method: 'POST', headers: await this.headers(false) }))
   }
 
   async getSkillTemplate(): Promise<Record<string, unknown>> {
     return handle(
-      await fetch(this.url('/skills/template'), { headers: await this.headers(false) }),
+      await fetch(this.url('/skills/template'), { method: 'POST', headers: await this.headers(false) }),
     )
   }
 
   async saveSkill(spec: SkillSpec): Promise<unknown> {
     return handle(
-      await fetch(this.url('/skills'), {
+      await fetch(this.url('/skills/save'), {
         method: 'POST',
         headers: await this.headers(),
         body: JSON.stringify(spec),
@@ -284,18 +296,19 @@ export class ApiClient {
 
   async deleteSkill(id: string): Promise<{ deleted: boolean; id: string }> {
     return handle(
-      await fetch(this.url(`/skills/${encodeURIComponent(id)}`), {
-        method: 'DELETE',
-        headers: await this.headers(false),
+      await fetch(this.url('/skills/delete'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ skill_id: id }),
       }),
     )
   }
 
   async setSkillVisibility(id: string, visibility: Visibility): Promise<void> {
-    const res = await fetch(this.url(`/skills/${encodeURIComponent(id)}/visibility`), {
-      method: 'PATCH',
+    const res = await fetch(this.url('/skills/set-visibility'), {
+      method: 'POST',
       headers: await this.headers(),
-      body: JSON.stringify({ visibility }),
+      body: JSON.stringify({ skill_id: id, visibility }),
     })
     if (!res.ok) await handle(res)
   }
@@ -342,7 +355,8 @@ export class ApiClient {
 
   async listConversations(): Promise<ConversationListResponse> {
     return handle(
-      await fetch(this.url('/conversations'), {
+      await fetch(this.url('/conversations/list'), {
+        method: 'POST',
         headers: await this.headers(false),
       }),
     )
@@ -350,8 +364,10 @@ export class ApiClient {
 
   async getConversation(conversationId: string): Promise<ConversationGetResponse> {
     return handle(
-      await fetch(this.url(`/conversations/${encodeURIComponent(conversationId)}`), {
-        headers: await this.headers(false),
+      await fetch(this.url('/conversations/get'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ conversation_id: conversationId }),
       }),
     )
   }
@@ -382,13 +398,12 @@ export class ApiClient {
     signal?: AbortSignal,
     afterSeq = 0,
   ): Promise<void> {
-    const res = await fetch(
-      this.url(`/runs/${encodeURIComponent(runId)}/stream?after_seq=${encodeURIComponent(afterSeq)}`),
-      {
-        headers: await this.headers(false),
-        signal,
-      },
-    )
+    const res = await fetch(this.url('/runs/stream'), {
+      method: 'POST',
+      headers: await this.headers(),
+      body: JSON.stringify({ run_id: runId, after_seq: afterSeq }),
+      signal,
+    })
     if (!res.ok || !res.body) {
       await handle(res)
       return
@@ -398,17 +413,20 @@ export class ApiClient {
 
   async getRunStatus(runId: string): Promise<RunStatusResponse> {
     return handle(
-      await fetch(this.url(`/runs/${encodeURIComponent(runId)}/status`), {
-        headers: await this.headers(false),
+      await fetch(this.url('/runs/status'), {
+        method: 'POST',
+        headers: await this.headers(),
+        body: JSON.stringify({ run_id: runId }),
       }),
     )
   }
 
   async stopRun(runId: string): Promise<RunStatusResponse> {
     return handle(
-      await fetch(this.url(`/runs/${encodeURIComponent(runId)}/stop`), {
+      await fetch(this.url('/runs/stop'), {
         method: 'POST',
-        headers: await this.headers(false),
+        headers: await this.headers(),
+        body: JSON.stringify({ run_id: runId }),
       }),
     )
   }

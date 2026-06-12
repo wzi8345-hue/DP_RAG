@@ -10,10 +10,11 @@ from ..authz import require_manage, require_read, require_visibility_allowed
 from ..deps import AuthContext, require_auth
 from ..models import (
     ConversationCopyRequest,
+    ConversationIdRequest,
     ConversationShareRequest,
     ConversationShareResponse,
+    ConversationVisibilityRequest,
     SharedConversationRequest,
-    VisibilityRequest,
 )
 from ...db import repo
 
@@ -60,18 +61,19 @@ def _conversation_payload(conv, auth: AuthContext | None = None, *, include_mess
     return payload
 
 
-@router.get("/conversations")
+@router.post("/conversations/list")
 def list_conversations(auth: AuthContext = Depends(require_auth)) -> dict:
     if not repo.available():
         return {"conversations": []}
     return {"conversations": [_conversation_payload(c, auth) for c in repo.list_conversations(auth)]}
 
 
-@router.get("/conversations/{conversation_id}")
+@router.post("/conversations/get")
 def get_conversation(
-    conversation_id: str,
+    req: ConversationIdRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> dict:
+    conversation_id = req.conversation_id
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
     conv = repo.get_conversation(conversation_id)
@@ -81,12 +83,12 @@ def get_conversation(
     return {"conversation": _conversation_payload(conv, auth, include_messages=True)}
 
 
-@router.patch("/conversations/{conversation_id}/visibility")
+@router.post("/conversations/set-visibility")
 def set_conversation_visibility(
-    conversation_id: str,
-    req: VisibilityRequest,
+    req: ConversationVisibilityRequest,
     auth: AuthContext = Depends(require_auth),
 ) -> dict:
+    conversation_id = req.conversation_id
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
     require_visibility_allowed(auth, req.visibility)

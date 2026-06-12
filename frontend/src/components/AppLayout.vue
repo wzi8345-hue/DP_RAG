@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { useLogto } from '@logto/vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { postLogoutRedirectUri } from '@/auth/logto'
+import { NButton } from 'naive-ui'
+import { postLogoutRedirectUri, redirectUri } from '@/auth/logto'
 import { useAuthz } from '@/composables/useAuthz'
 import UserMenuPopover from '@/components/UserMenuPopover.vue'
 
@@ -16,7 +17,7 @@ type UserInfo = {
 
 const { t } = useI18n()
 const router = useRouter()
-const { signOut, fetchUserInfo } = useLogto()
+const { signOut, signIn, fetchUserInfo, isAuthenticated } = useLogto()
 const authz = useAuthz()
 
 const nav = computed(() => [
@@ -46,13 +47,23 @@ function handleSignOut() {
   signOut(postLogoutRedirectUri)
 }
 
-onMounted(async () => {
-  try {
-    userInfo.value = (await fetchUserInfo()) || {}
-  } catch {
-    userInfo.value = {}
-  }
-})
+// 仅在已登录时拉取用户信息；用 watch(immediate) 而非 onMounted，避免未登录时
+// 发起 Logto 请求，也保证登录态从 false→true 时（无需重挂组件）补取一次。
+watch(
+  isAuthenticated,
+  async (authed) => {
+    if (!authed) {
+      userInfo.value = {}
+      return
+    }
+    try {
+      userInfo.value = (await fetchUserInfo()) || {}
+    } catch {
+      userInfo.value = {}
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -83,16 +94,40 @@ onMounted(async () => {
 
       <div class="p-1.5">
         <UserMenuPopover
+          v-if="isAuthenticated"
           :email="userEmail"
           :name="userName"
           @settings="openSettings"
           @sign-out="handleSignOut"
         />
+        <NButton v-else type="primary" block @click="signIn(redirectUri)">
+          <template #icon>
+            <span class="i-lucide-log-in" />
+          </template>
+          {{ t('auth.signIn') }}
+        </NButton>
       </div>
     </aside>
 
     <main class="app-workspace">
-      <RouterView />
+      <RouterView v-if="isAuthenticated" />
+
+      <div v-else class="h-full grid place-items-center bg-app px-4">
+        <div class="card w-full max-w-sm p-7 text-center">
+          <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-[8px] bg-accent text-lg font-bold text-white">
+            DP
+          </div>
+          <h1 class="text-lg font-semibold text-base">{{ t('app.name') }}</h1>
+          <p class="mt-1 text-sm text-muted">{{ t('app.tagline') }}</p>
+          <p class="mt-4 text-xs text-faint">{{ t('auth.required') }}</p>
+          <NButton type="primary" block class="mt-5" @click="signIn(redirectUri)">
+            <template #icon>
+              <span class="i-lucide-log-in" />
+            </template>
+            {{ t('auth.signIn') }}
+          </NButton>
+        </div>
+      </div>
     </main>
   </div>
 </template>
