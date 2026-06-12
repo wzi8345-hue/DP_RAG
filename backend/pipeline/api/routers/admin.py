@@ -191,6 +191,43 @@ def _config_status(cfg: dict, *, requires_key: bool = True) -> str:
     return "configured"
 
 
+def _probe_postgres() -> str:
+    from ... import db
+
+    if not db.configured():
+        return "not_configured"
+    try:
+        with db.cursor() as cur:
+            cur.execute("SELECT 1")
+        return "ok"
+    except Exception as e:  # noqa: BLE001
+        return f"error: {e}"
+
+
+def _probe_redis() -> str:
+    from ...clients import redis as redis_runtime
+
+    if not redis_runtime.configured():
+        return "not_configured"
+    try:
+        redis_runtime.get_redis_runtime().client.ping()
+        return "ok"
+    except Exception as e:  # noqa: BLE001
+        return f"error: {e}"
+
+
+def _probe_object_store() -> str:
+    from ...clients import object_store
+
+    if not object_store.configured():
+        return "not_configured"
+    try:
+        object_store.get_object_store().ensure_bucket()
+        return "ok"
+    except Exception as e:  # noqa: BLE001
+        return f"error: {e}"
+
+
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     """健康检查: 检测各依赖服务的连通性与配置完整性。
@@ -203,6 +240,9 @@ def health() -> HealthResponse:
     embedding_status = "unknown"
     reranker_status = "unknown"
     reflection_status = "unknown"
+    postgres_status = _probe_postgres()
+    redis_status = _probe_redis()
+    object_store_status = _probe_object_store()
 
     try:
         from ..deps import get_pipeline
@@ -257,13 +297,17 @@ def health() -> HealthResponse:
     except Exception:
         pass  # Pipeline 未初始化
 
+    healthy = milvus_status == "ok" and postgres_status in ("ok", "not_configured") and redis_status in ("ok", "not_configured")
     return HealthResponse(
-        status="ok" if milvus_status == "ok" else "degraded",
+        status="ok" if healthy else "degraded",
         milvus=milvus_status,
         llm=llm_status,
         embedding=embedding_status,
         reranker=reranker_status,
         reflection=reflection_status,
+        postgres=postgres_status,
+        redis=redis_status,
+        object_store=object_store_status,
     )
 
 

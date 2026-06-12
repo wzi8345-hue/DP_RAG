@@ -33,19 +33,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # SessionLogHandler 永远收不到 → 检索日志全空。
     logging.getLogger("pipeline").setLevel(logging.INFO)
 
-    # 数据库: 检查/初始化表结构 (幂等)。未配置 DATABASE_URL 时跳过 (过渡期允许无库运行);
-    # 配置了但连接失败则记录错误并继续, 不阻塞 RAG 主功能。
-    from .. import db
-    if db.configured():
-        try:
-            db.init_db()
-        except Exception as e:
-            logger.error("[db] 初始化失败 (继续启动): %s", e)
-    else:
-        logger.warning("[db] 未配置 DATABASE_URL, 跳过表结构初始化")
+    from .. import db, preflight
 
     config_path = os.environ.get("CONFIG_PATH")
     pipeline = Pipeline(config_path=config_path or None)
+
+    # 启动即自检所有已配置资源 (postgres / redis / 对象存储 / milvus) 并幂等初始化
+    # (建表 / 建 bucket)。任一必需资源重试后仍不可达则抛出, uvicorn 启动失败 → 容器重启,
+    # 日志中暴露明确原因 (避免「进程活着但连不上依赖」的假健康)。
+    preflight.run_dependency_checks(pipeline=pipeline)
 
     # 多轮对话保留轮数: 与算法侧 generation.max_history_turns 一致
     gen_cfg = getattr(pipeline, "config", None) and pipeline.config.generation or {}

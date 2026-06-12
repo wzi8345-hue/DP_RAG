@@ -210,6 +210,9 @@ class HealthResponse(BaseModel):
     embedding: str = "unknown"
     reranker: str = "unknown"
     reflection: str = "unknown"
+    postgres: str = "unknown"
+    redis: str = "unknown"
+    object_store: str = "unknown"
 
 
 class FileUploadResponse(BaseModel):

@@ -1,21 +1,37 @@
 # DP-RAG 部署编排：backend + worker + postgres + redis + milvus + rustfs
 # 前端走 GitHub Pages，或用 frontend 服务自托管。
-# LLM / Embedding / Reranker 视为外部服务，通过环境变量配置连接（无需挂载 YAML）。
+# LLM / Embedding / Reranker 视为外部服务（base_service 已独立部署在 GPU 机，
+# 经 nginx 暴露为 https://funmg.dp.tech/vllm-{llm,embed,rerank}），通过 .env 配置连接。
+#
+# 目标主机：32 vCPU / 128 GiB / 系统盘 40G（小）/ NAS 5T（数据盘）。
+# 资源：各服务用 deploy.resources 做 CPU/内存上限与预留（见下）。
+#   limits 之和可超过物理核（上限封顶，非独占）；reservations 之和须 < 物理资源。
+# 磁盘：所有持久化数据通过 ${DATA_DIR} 落到 NAS（5T），不要占用 40G 系统盘。
+#   ⚠ Postgres / Milvus 数据放 NFS 需确认 NAS 支持文件锁（NFSv4），否则建议放本地块存储。
+#   ⚠ Docker 镜像层默认在系统盘 /var/lib/docker；镜像较大时请把 data-root 也迁到 NAS。
 #
 # 用法：
-#   cp .env.example .env && 编辑
+#   cp .env.example .env && 编辑（务必设置 DATA_DIR 指向 NAS 挂载点）
+#   mkdir -p "$DATA_DIR"/{postgres,milvus,rustfs,rag}   # redis 用本地命名卷, 无需建目录
 #   docker compose --env-file .env up -d
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
 
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-dprag}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
       POSTGRES_DB: ${POSTGRES_DB:-dprag}
     volumes:
-      - pg-data:/var/lib/postgresql/data
+      - ${DATA_DIR:?set DATA_DIR to a NAS path}/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-dprag}']
       interval: 10s
@@ -23,11 +39,19 @@ services:
       retries: 5
     ports:
       - '5432:5432'
+    deploy:
+      resources:
+        limits: { cpus: '4', memory: 8g }
+        reservations: { cpus: '1', memory: 2g }
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *default-logging
     command: redis-server --appendonly yes
+    # ⚠ redis 只存「运行队列 + SSE 事件流」等临时数据(带 TTL), 用本地命名卷(本地盘)。
+    # 切勿放到 NAS/NFS: redis 单线程, AOF fsync 在 NFS 上停顿会让它无法响应 BLPOP,
+    # 表现为 worker "Timeout reading from socket"。本地盘数据量很小, 不会撑爆系统盘。
     volumes:
       - redis-data:/data
     healthcheck:
@@ -37,10 +61,15 @@ services:
       retries: 5
     ports:
       - '${REDIS_PORT:-6379}:6379'
+    deploy:
+      resources:
+        limits: { cpus: '2', memory: 4g }
+        reservations: { cpus: '0.5', memory: 512m }
 
   milvus:
     image: milvusdb/milvus:v2.5.4
     restart: unless-stopped
+    logging: *default-logging
     command: ['milvus', 'run', 'standalone']
     security_opt:
       - seccomp:unconfined
@@ -49,28 +78,50 @@ services:
       ETCD_DATA_DIR: '/var/lib/milvus/etcd'
       COMMON_STORAGETYPE: 'local'
     volumes:
-      - milvus-data:/var/lib/milvus
+      - ${DATA_DIR:?set DATA_DIR to a NAS path}/milvus:/var/lib/milvus
     ports:
       - '${MILVUS_PORT:-19530}:19530'
       - '${MILVUS_METRICS_PORT:-9091}:9091'
+    deploy:
+      resources:
+        # 向量索引常驻内存，是本机最吃 RAM 的服务
+        limits: { cpus: '8', memory: 32g }
+        reservations: { cpus: '2', memory: 8g }
+
+  rustfs-perms:
+    image: alpine
+    user: root
+    volumes:
+      - ${DATA_DIR:?set DATA_DIR to a NAS path}/rustfs:/fix
+    command: chown -R 10001:10001 /fix
+    restart: "no"
 
   rustfs:
     image: rustfs/rustfs:latest
+    depends_on:
+      rustfs-perms:
+        condition: service_completed_successfully
     restart: unless-stopped
+    logging: *default-logging
     environment:
       RUSTFS_ACCESS_KEY: ${OBJECT_STORE_ACCESS_KEY:-dprag}
       RUSTFS_SECRET_KEY: ${OBJECT_STORE_SECRET_KEY:-change-me-object-store}
     volumes:
-      - rustfs-data:/data
+      - ${DATA_DIR:?set DATA_DIR to a NAS path}/rustfs:/data
     command: /data
     ports:
       - '${OBJECT_STORE_PORT:-9000}:9000'
+    deploy:
+      resources:
+        limits: { cpus: '4', memory: 8g }
+        reservations: { cpus: '1', memory: 1g }
 
   backend:
     image: ${BACKEND_IMAGE}
     build:
       context: ../backend
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -141,17 +192,23 @@ services:
       # 可选：仍想用 YAML 覆盖时设置 CONFIG_PATH 并挂载文件（环境变量优先级更高）
       CONFIG_PATH: ${CONFIG_PATH:-}
     volumes:
-      - rag-data:/data
+      - ${DATA_DIR:?set DATA_DIR to a NAS path}/rag:/data
       # 如需用 YAML 提供额外/算法参数，取消下面注释并设置 CONFIG_PATH=/app/config.yaml
       # - ./config.yaml:/app/config.yaml:ro
     ports:
       - '${API_PORT:-8080}:8080'
+    deploy:
+      resources:
+        # Web 进程主要等外部 vLLM（网络 IO），CPU 占用轻
+        limits: { cpus: '6', memory: 12g }
+        reservations: { cpus: '1', memory: 2g }
 
   worker:
     image: ${BACKEND_IMAGE}
     build:
       context: ../backend
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -208,13 +265,19 @@ services:
       UNIPARSER_API_KEY: ${UNIPARSER_API_KEY:-}
       CONFIG_PATH: ${CONFIG_PATH:-}
     volumes:
-      - rag-data:/data
+      - ${DATA_DIR:?set DATA_DIR to a NAS path}/rag:/data
+    deploy:
+      resources:
+        # 生成 worker 同样等外部 LLM，CPU 轻
+        limits: { cpus: '6', memory: 12g }
+        reservations: { cpus: '1', memory: 2g }
 
   ingest-worker:
     image: ${BACKEND_IMAGE}
     build:
       context: ../backend
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -265,7 +328,12 @@ services:
       UNIPARSER_API_KEY: ${UNIPARSER_API_KEY:-}
       CONFIG_PATH: ${CONFIG_PATH:-}
     volumes:
-      - rag-data:/data
+      - ${DATA_DIR:?set DATA_DIR to a NAS path}/rag:/data
+    deploy:
+      resources:
+        # 解析/入库：分块 + 本地落盘 + 调用外部 embedding；预留较多核与内存
+        limits: { cpus: '8', memory: 24g }
+        reservations: { cpus: '2', memory: 4g }
 
   # 可选：自托管前端（默认部署在 GitHub Pages，可不启用此服务）
   frontend:
@@ -278,13 +346,17 @@ services:
         VITE_LOGTO_ROLE_ADMIN: ${LOGTO_ROLE_ADMIN:-sci-loop-admin}
         VITE_LOGTO_ROLE_ROOT: ${LOGTO_ROLE_ROOT:-sci-loop-root}
     restart: unless-stopped
+    logging: *default-logging
     profiles: ['selfhost']
     ports:
       - '9527:80'
+    deploy:
+      resources:
+        limits: { cpus: '1', memory: 1g }
+        reservations: { cpus: '0.25', memory: 256m }
 
+# 持久化数据（postgres / milvus / rustfs / rag 上传产物）走 ${DATA_DIR} 绑定挂载落到 NAS 5T，
+# 避免占满 40G 系统盘。例外：redis 仅存临时队列/事件流，用本地命名卷（见下），不放 NAS。
+# 部署前请先 mkdir ${DATA_DIR}/{postgres,milvus,rustfs,rag} 并确保读写权限。
 volumes:
-  pg-data:
   redis-data:
-  milvus-data:
-  rag-data:
-  rustfs-data:

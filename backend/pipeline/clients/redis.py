@@ -50,7 +50,17 @@ class RedisRuntime:
         self.settings = settings
         from redis import Redis
 
-        self.client = Redis.from_url(settings.url, decode_responses=True)
+        # 注意: 不设 socket_timeout (保持 None), 否则会与阻塞命令 (BLPOP timeout=5) 冲突,
+        # 导致 "Timeout reading from socket"。仅设连接超时 + keepalive + 周期健康检查 + 自动重试,
+        # 以便快速发现断连并在 redis 抖动/重启后自愈。
+        self.client = Redis.from_url(
+            settings.url,
+            decode_responses=True,
+            socket_connect_timeout=int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "5")),
+            socket_keepalive=True,
+            health_check_interval=int(os.environ.get("REDIS_HEALTH_CHECK_INTERVAL", "30")),
+            retry_on_timeout=True,
+        )
 
     def stream_key(self, run_id: str) -> str:
         return f"{self.settings.stream_prefix}:{run_id}"

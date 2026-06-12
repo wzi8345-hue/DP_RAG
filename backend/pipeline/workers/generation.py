@@ -8,15 +8,19 @@ import signal
 import time
 from typing import Any
 
+from redis.exceptions import RedisError
+
+from .. import preflight
 from ..auth import AuthContext
 from ..clients import redis as redis_runtime
-from ..db import configured as db_configured
-from ..db import init_db
 from ..db import repo
 from ..flows.query import ChatSession
 from ..pipeline import Pipeline
 
 logger = logging.getLogger(__name__)
+
+# redis 抖动 / 短暂不可达时的循环重试间隔 (秒)
+_REDIS_RETRY_DELAY_S = 2.0
 
 
 def _setup_logging() -> None:
@@ -63,13 +67,12 @@ def _apply_skill_scope(pipe: Pipeline, auth: AuthContext) -> None:
 
 class GenerationWorker:
     def __init__(self) -> None:
-        if not db_configured():
-            raise RuntimeError("DATABASE_URL 未配置")
-        if not redis_runtime.configured():
-            raise RuntimeError("REDIS_URL 未配置")
-        init_db()
-        self.redis = redis_runtime.get_redis_runtime()
         self.pipeline = Pipeline(config_path=os.environ.get("CONFIG_PATH") or None)
+        # 启动即自检并初始化依赖 (postgres 必需+建表 / redis 必需 / 对象存储+milvus)
+        preflight.run_dependency_checks(
+            pipeline=self.pipeline, require_db=True, require_redis=True,
+        )
+        self.redis = redis_runtime.get_redis_runtime()
         self.stopping = False
 
     def stop(self, *_args) -> None:
@@ -78,7 +81,13 @@ class GenerationWorker:
     def run_forever(self) -> None:
         logger.info("[generation-worker] started")
         while not self.stopping:
-            run_id = self.redis.dequeue_run(timeout_s=5)
+            try:
+                run_id = self.redis.dequeue_run(timeout_s=5)
+            except RedisError as e:
+                # redis 抖动 / 重启不应让 worker 进程崩溃; 退避后重连重试
+                logger.warning("[generation-worker] redis 暂时不可用, %.0fs 后重试: %s", _REDIS_RETRY_DELAY_S, e)
+                time.sleep(_REDIS_RETRY_DELAY_S)
+                continue
             if not run_id:
                 continue
             try:
