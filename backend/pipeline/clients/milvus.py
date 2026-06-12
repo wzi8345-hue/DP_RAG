@@ -60,6 +60,7 @@ STATS_PAGE_SIZE = 5000
 
 # VARCHAR 字段长度上限
 MAX_LEN_PK = 256
+MAX_LEN_KB_ID = 128
 MAX_LEN_DOC_ID = 128
 MAX_LEN_DOC_NAME = 512
 MAX_LEN_CHUNK_ID = 64
@@ -265,6 +266,7 @@ def build_schema(
         description="literature chunks (summary/text/title/table/image/equation/references) with dense + BM25 sparse embeddings; v5 (equation + references)",
     )
     schema.add_field("pk", DataType.VARCHAR, is_primary=True, max_length=MAX_LEN_PK)
+    schema.add_field("kb_id", DataType.VARCHAR, max_length=MAX_LEN_KB_ID)
     schema.add_field("doc_id", DataType.VARCHAR, max_length=MAX_LEN_DOC_ID)
     schema.add_field("doc_name", DataType.VARCHAR, max_length=MAX_LEN_DOC_NAME)
     schema.add_field("chunk_id", DataType.VARCHAR, max_length=MAX_LEN_CHUNK_ID)
@@ -278,6 +280,10 @@ def build_schema(
     schema.add_field("content", DataType.VARCHAR, max_length=MAX_LEN_CONTENT)
     schema.add_field("context", DataType.VARCHAR, max_length=MAX_LEN_CONTEXT)
     schema.add_field("related_assets", DataType.JSON)
+    schema.add_field("bbox", DataType.JSON)
+    schema.add_field("bboxes", DataType.JSON)
+    schema.add_field("page_width", DataType.INT32)
+    schema.add_field("page_height", DataType.INT32)
     # embedding_text 开启 analyzer, 作为 BM25 Function 的输入
     schema.add_field(
         "embedding_text",
@@ -493,8 +499,21 @@ def _normalize_related_assets(ra: Any) -> List[Dict[str, Any]]:
     return out
 
 
+def _normalize_json_list(value: Any) -> List[Dict[str, Any]]:
+    if isinstance(value, dict):
+        return [value]
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _normalize_json_obj(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def chunk_to_row(
     chunk: Dict[str, Any],
+    kb_id: str,
     doc_id: str,
     doc_name: str,
     publication_year: int = 0,
@@ -510,7 +529,8 @@ def chunk_to_row(
         paragraph_index = -1
 
     return {
-        "pk": f"{doc_id}::{chunk_id}",
+        "pk": _truncate(f"{kb_id}::{doc_id}::{chunk_id}", MAX_LEN_PK),
+        "kb_id": _truncate(kb_id, MAX_LEN_KB_ID),
         "doc_id": _truncate(doc_id, MAX_LEN_DOC_ID),
         "doc_name": _truncate(doc_name, MAX_LEN_DOC_NAME),
         "chunk_id": _truncate(chunk_id, MAX_LEN_CHUNK_ID),
@@ -522,6 +542,10 @@ def chunk_to_row(
         "content": _truncate(chunk.get("content") or "", MAX_LEN_CONTENT),
         "context": _truncate(chunk.get("context") or "", MAX_LEN_CONTEXT),
         "related_assets": _normalize_related_assets(chunk.get("related_assets")),
+        "bbox": _normalize_json_obj(chunk.get("bbox")),
+        "bboxes": _normalize_json_list(chunk.get("bboxes") or chunk.get("bbox")),
+        "page_width": int(chunk.get("page_width") or 0),
+        "page_height": int(chunk.get("page_height") or 0),
         "embedding_text": _truncate(chunk.get("embedding_text") or "", MAX_LEN_EMB_TEXT),
         "embedding": chunk["embedding"],
     }
@@ -695,8 +719,8 @@ class MilvusIngester:
 
     def _create_scalar_indexes(self) -> None:
         for fname in (
-            "doc_id", "type", "publication_year",
-            "page_start", "paragraph_index",
+            "kb_id", "doc_id", "type", "publication_year",
+            "page_start", "paragraph_index", "page_width", "page_height",
         ):
             if self._field_has_index(fname):
                 continue
@@ -767,9 +791,9 @@ class MilvusIngester:
                 field_names = {f["name"] for f in fields}
                 # v4 schema 必备字段 (在 v3 上新增 paragraph_index)
                 required_fields = {
-                    "pk", "doc_id", "publication_year",
+                    "pk", "kb_id", "doc_id", "publication_year",
                     "embedding", "sparse_embedding",
-                    "paragraph_index",
+                    "paragraph_index", "bbox", "bboxes", "page_width", "page_height",
                 }
                 missing = required_fields - field_names
                 if missing:
@@ -777,7 +801,7 @@ class MilvusIngester:
                         f"\n[ERROR] 现有集合 '{self.collection}' schema 缺少字段: {missing}"
                     )
                     logger.error(
-                        "        v3 -> v4 schema 不兼容 (新增 paragraph_index 字段)。"
+                        "        当前 schema 不兼容 (新增 kb_id/bbox 等字段)。"
                         " 请用 recreate=True 重建集合并重新灌入数据。"
                     )
                     raise SystemExit(1)
@@ -854,12 +878,15 @@ class MilvusIngester:
                     )
                 raise
 
-    def purge_doc(self, doc_id: str) -> int:
+    def purge_doc(self, doc_id: str, kb_id: str | None = None) -> int:
+        filter_expr = f'doc_id == "{doc_id}"'
+        if kb_id:
+            filter_expr = f'kb_id == "{kb_id}" and {filter_expr}'
         try:
             self._call_with_reconnect(
                 self.client.delete,
                 collection_name=self.collection,
-                filter=f'doc_id == "{doc_id}"',
+                filter=filter_expr,
             )
             time.sleep(0.2)
             return 0
@@ -869,9 +896,25 @@ class MilvusIngester:
             logger.warning(f"  [warn] purge {doc_id} 失败 (可能是空集合): {e}")
             return 0
 
+    def purge_kb(self, kb_id: str) -> int:
+        try:
+            self._call_with_reconnect(
+                self.client.delete,
+                collection_name=self.collection,
+                filter=f'kb_id == "{kb_id}"',
+            )
+            time.sleep(0.2)
+            return 0
+        except Exception as e:
+            if _is_transient_rpc_error(e):
+                raise
+            logger.warning(f"  [warn] purge kb_id={kb_id} 失败 (可能是空集合): {e}")
+            return 0
+
     def ingest_file(
         self,
         path: str,
+        kb_id: str,
         doc_id: Optional[str] = None,
         doc_name: Optional[str] = None,
         purge_existing: bool = True,
@@ -923,13 +966,13 @@ class MilvusIngester:
         )
 
         if purge_existing:
-            self.purge_doc(doc_id)
+            self.purge_doc(doc_id, kb_id=kb_id)
 
         rows: List[Dict[str, Any]] = []
         type_count: Dict[str, int] = {}
         for c in chunks:
             row = chunk_to_row(
-                c, doc_id=doc_id, doc_name=doc_name,
+                c, kb_id=kb_id, doc_id=doc_id, doc_name=doc_name,
                 publication_year=publication_year,
             )
             rows.append(row)
@@ -948,6 +991,7 @@ class MilvusIngester:
 
         return {
             "path": path,
+            "kb_id": kb_id,
             "doc_id": doc_id,
             "doc_name": doc_name,
             "publication_year": publication_year,
@@ -958,6 +1002,7 @@ class MilvusIngester:
     def ingest_glob(
         self,
         pattern: str,
+        kb_id: str,
         purge_existing: bool = True,
         batch_size: int = DEFAULT_BATCH_SIZE,
         cli_publication_year: Optional[int] = None,
@@ -969,32 +1014,33 @@ class MilvusIngester:
         for p in paths:
             logger.info(f"\n>>> 处理 {p}")
             results.append(self.ingest_file(
-                p, purge_existing=purge_existing, batch_size=batch_size,
+                p, kb_id=kb_id, purge_existing=purge_existing, batch_size=batch_size,
                 cli_publication_year=cli_publication_year,
             ))
         return results
 
-    def list_doc_ids(self, page_size: int = STATS_PAGE_SIZE) -> set:
+    def list_doc_ids(self, page_size: int = STATS_PAGE_SIZE, kb_id: str | None = None) -> set:
         """查询集合中所有已存在的 doc_id 集合。
 
         用于 append 模式下跳过已灌入的文档, 避免重复处理。
         """
         try:
-            return self._list_doc_ids_impl(page_size=page_size)
+            return self._list_doc_ids_impl(page_size=page_size, kb_id=kb_id)
         except Exception as e:
             if _is_transient_rpc_error(e):
                 self.reconnect_client()
-                return self._list_doc_ids_impl(page_size=page_size)
+                return self._list_doc_ids_impl(page_size=page_size, kb_id=kb_id)
             raise
 
-    def _list_doc_ids_impl(self, page_size: int = STATS_PAGE_SIZE) -> set:
+    def _list_doc_ids_impl(self, page_size: int = STATS_PAGE_SIZE, kb_id: str | None = None) -> set:
         doc_ids: set = set()
         out_fields = ["doc_id"]
+        filter_expr = f'kb_id == "{kb_id}"' if kb_id else ""
         rows_iter = None
         try:
             rows_iter = self.client.query_iterator(
                 collection_name=self.collection,
-                filter="",
+                filter=filter_expr,
                 output_fields=out_fields,
                 batch_size=page_size,
             )
@@ -1011,7 +1057,7 @@ class MilvusIngester:
             while True:
                 batch = self.client.query(
                     collection_name=self.collection,
-                    filter="",
+                    filter=filter_expr,
                     output_fields=out_fields,
                     limit=page_size,
                     offset=offset,

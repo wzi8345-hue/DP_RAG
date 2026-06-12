@@ -260,6 +260,7 @@ class Pipeline:
         bm25_cfg = cfg.get("bm25", {}) or {}
         uri, token, db_name = resolve_milvus_connection(cfg)
         collection = cfg.get("collection", "literature_chunks")
+        kb_id = cfg.get("kb_id") or collection
         dim = int(cfg.get("dim", 1024))
 
         def _make_ingester(*, use_recreate: bool = False):
@@ -347,6 +348,7 @@ class Pipeline:
                 try:
                     r = ingester.ingest_file(
                         p,
+                        kb_id=kb_id,
                         doc_id=doc_id_override,
                         doc_name=doc_name_override,
                         purge_existing=purge_existing,
@@ -391,13 +393,14 @@ class Pipeline:
         use_agentic: bool = True,
         professional: bool = False,
         collection: Optional[str] = None,
+        kb_ids: Optional[List[str]] = None,
     ) -> QueryResult:
         """单次查询: 检索 + 生成, 返回 QueryResult。"""
-        self._maybe_switch_collection(collection)
+        _ = collection
         result, _ = self._get_query_flow().run(
             query, mode=mode, top_k=top_k, stream=stream,
             output_file=output_file, use_agentic=use_agentic,
-            professional=professional,
+            professional=professional, kb_ids=kb_ids,
         )
         return result
 
@@ -411,6 +414,7 @@ class Pipeline:
         use_agentic: bool = True,
         professional: bool = False,
         collection: Optional[str] = None,
+        kb_ids: Optional[List[str]] = None,
     ) -> tuple:
         """多轮对话查询, 维护对话历史。
 
@@ -422,16 +426,17 @@ class Pipeline:
             stream: 是否流式输出
             use_agentic: 是否使用 Agentic RAG
             professional: 是否使用专业研究模式
-            collection: 目标 Milvus 集合名 (None 则用配置默认)
+            collection: 兼容参数, 不再切换 Milvus 物理 collection
+            kb_ids: 可检索的业务知识库 id 列表
 
         Returns:
             (QueryResult, ChatSession) 元组
         """
-        self._maybe_switch_collection(collection)
+        _ = collection
         return self._get_query_flow().run(
             query, mode=mode, top_k=top_k, stream=stream,
             use_agentic=use_agentic, session=session,
-            professional=professional,
+            professional=professional, kb_ids=kb_ids,
         )
 
     # ── 灌入到指定集合 ──────────────────────────────────────────────
@@ -439,38 +444,41 @@ class Pipeline:
     def ingest_files(
         self,
         file_paths: List[str],
-        collection: str,
+        collection: str | None = None,
+        kb_id: str | None = None,
         output_dir: Optional[str] = None,
         parse_timeout: Optional[int] = None,
         backend: Optional[str] = None,
     ) -> IngestResult:
-        """将 PDF 文件灌入到指定名称的 Milvus 集合 (自动创建集合)。
+        """将 PDF 文件灌入统一 Milvus 物理集合, 用 kb_id 区分业务知识库。
 
         Args:
             file_paths: PDF 文件路径列表
-            collection: 目标集合名 (建议以 kb_ 开头)
+            collection: 兼容参数, 语义为业务 kb_id
+            kb_id: 业务知识库 id; 优先于 collection
             output_dir: 中间产物输出目录
             parse_timeout: 解析整体超时秒数
             backend: 临时覆盖 parsing.backend
         """
-        original_collection = self.config.milvus.get("collection")
         original_backend = self.config.parsing.get("backend")
-        self.config.milvus["collection"] = collection
+        effective_kb_id = kb_id or collection or self.config.milvus.get("kb_id") or "default"
+        original_kb_id = self.config.milvus.get("kb_id")
+        self.config.milvus["kb_id"] = effective_kb_id
         if backend:
             self.config.parsing["backend"] = backend
-        # 重置 IngestFlow, 让它以新集合名重新构建 MilvusIngester
+        # 重置 IngestFlow, 让它读取最新 kb_id/backend。
         self._ingest_flow = None
         try:
             return self._get_ingest_flow().run(
                 file_paths, output_dir=output_dir,
                 parse_timeout=parse_timeout,
+                kb_id=effective_kb_id,
             )
         finally:
-            # 恢复原始集合名
-            if original_collection is not None:
-                self.config.milvus["collection"] = original_collection
+            if original_kb_id is not None:
+                self.config.milvus["kb_id"] = original_kb_id
             else:
-                self.config.milvus.pop("collection", None)
+                self.config.milvus.pop("kb_id", None)
             if backend:
                 if original_backend is None:
                     self.config.parsing.pop("backend", None)
@@ -498,8 +506,8 @@ class Pipeline:
             skip_existing: append 模式下是否跳过已存在 doc_id
             progress_callback: 进度回调 callback(current, total, doc_id, status)
         """
-        original_collection = self.config.milvus.get("collection")
-        self.config.milvus["collection"] = collection
+        original_kb_id = self.config.milvus.get("kb_id")
+        self.config.milvus["kb_id"] = collection
         self._ingest_flow = None
         try:
             return self._get_ingest_flow().vectorize_from_directory(
@@ -509,10 +517,10 @@ class Pipeline:
                 progress_callback=progress_callback,
             )
         finally:
-            if original_collection is not None:
-                self.config.milvus["collection"] = original_collection
+            if original_kb_id is not None:
+                self.config.milvus["kb_id"] = original_kb_id
             else:
-                self.config.milvus.pop("collection", None)
+                self.config.milvus.pop("kb_id", None)
             self._ingest_flow = None
 
     def reingest_directory(
@@ -529,8 +537,8 @@ class Pipeline:
         逐字节喂回 Milvus, 因此重灌结果与首次入库一致, 且不依赖 embedding 服务在线。
         缺 vec.json 的文档自动回退到完整 chunk→embed→store。
         """
-        original_collection = self.config.milvus.get("collection")
-        self.config.milvus["collection"] = collection
+        original_kb_id = self.config.milvus.get("kb_id")
+        self.config.milvus["kb_id"] = collection
         self._ingest_flow = None
         try:
             return self._get_ingest_flow().reingest_from_directory(
@@ -540,10 +548,10 @@ class Pipeline:
                 progress_callback=progress_callback,
             )
         finally:
-            if original_collection is not None:
-                self.config.milvus["collection"] = original_collection
+            if original_kb_id is not None:
+                self.config.milvus["kb_id"] = original_kb_id
             else:
-                self.config.milvus.pop("collection", None)
+                self.config.milvus.pop("kb_id", None)
             self._ingest_flow = None
 
     # ── 集合管理 ────────────────────────────────────────────────────
@@ -630,6 +638,21 @@ class Pipeline:
             self._active_collection = None
         return True
 
+    def purge_kb_rows(self, kb_id: str) -> bool:
+        """从统一物理 Milvus collection 中删除某业务 KB 的全部 rows。"""
+        physical_collection = self.config.milvus.get("collection", self._default_collection)
+        with self._admin_milvus_client() as client:
+            if not client.has_collection(physical_collection):
+                return False
+            client.delete(
+                collection_name=physical_collection,
+                filter=f'kb_id == "{kb_id}"',
+            )
+        logger.info("[pipeline] 已删除 kb_id=%s 的 Milvus rows", kb_id)
+        if self._query_flow is not None:
+            self._query_flow.invalidate_caches()
+        return True
+
     def flush_collection(self, name: str) -> None:
         """flush 一个集合, 让 row_count 统计立即反映已插入数据。
 
@@ -644,19 +667,19 @@ class Pipeline:
             logger.warning(f"[pipeline] flush 集合失败 {name}: {e}")
 
     def list_doc_ids(self, collection: str) -> set:
-        """返回某集合中已入库的全部 doc_id (集合不存在时返回空集)。
+        """返回某业务 KB 中已入库的全部 doc_id (collection 参数语义为 kb_id)。"""
+        kb_id = collection
+        physical_collection = self.config.milvus.get("collection", self._default_collection)
 
-        用于"同库再次上传按文件名去重": doc_id == PDF 文件名 stem, 据此跳过
-        已入库文献, 只灌未入库的。
-        """
         doc_ids: set = set()
         with self._admin_milvus_client() as client:
-            if not client.has_collection(collection):
+            if not client.has_collection(physical_collection):
                 return doc_ids
+            filter_expr = f'kb_id == "{kb_id}"'
             # 优先 query_iterator (无 offset+limit 窗口上限); 老版本回退分页 query
             try:
                 it = client.query_iterator(
-                    collection_name=collection, filter="",
+                    collection_name=physical_collection, filter=filter_expr,
                     output_fields=["doc_id"], batch_size=5000,
                 )
                 while True:
@@ -673,7 +696,7 @@ class Pipeline:
                 offset, page = 0, 5000
                 while True:
                     batch = client.query(
-                        collection_name=collection, filter="",
+                        collection_name=physical_collection, filter=filter_expr,
                         output_fields=["doc_id"], limit=page, offset=offset,
                     )
                     if not batch:
@@ -686,7 +709,7 @@ class Pipeline:
                         break
                     offset += page
             except Exception as e:
-                logger.warning(f"[pipeline] list_doc_ids 查询失败 {collection}: {e}")
+                logger.warning(f"[pipeline] list_doc_ids 查询失败 kb_id={kb_id}: {e}")
         return doc_ids
 
     # ── 便利方法 ──────────────────────────────────────────────────────

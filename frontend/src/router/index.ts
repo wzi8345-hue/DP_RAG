@@ -23,6 +23,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/pages/SettingsPage.vue'),
   },
   {
+    path: '/admin',
+    name: 'admin',
+    component: () => import('@/pages/AdminPage.vue'),
+  },
+  {
     path: '/callback',
     name: 'callback',
     component: () => import('@/pages/CallbackPage.vue'),

@@ -19,6 +19,7 @@ const uploading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const collectionOptions = computed(() => [
+  { label: t('composer.allDocs'), value: '' },
   ...collections.value.map((c) => ({
     label: `${c.display_name || c.name.replace(/^kb_/, '')} (${c.row_count})`,
     value: c.name,
@@ -28,9 +29,6 @@ const collectionOptions = computed(() => [
 async function loadCollections() {
   try {
     collections.value = (await api.listCollections()).collections
-    if (!props.composer.collection && collections.value.length > 0) {
-      props.composer.collection = collections.value[0].name
-    }
   } catch {
     collections.value = []
   }

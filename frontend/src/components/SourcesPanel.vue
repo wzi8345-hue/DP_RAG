@@ -50,8 +50,29 @@ const activePdfItem = computed(() => {
 const activePdfPage = computed(() => Math.max(1, Number(activePdfItem.value?.hit.page_start ?? 1) || 1))
 const activePdfDocId = computed(() => activePdfItem.value?.hit.doc_id || activePdfItem.value?.hit.doc_name || '')
 const activePdfCollection = computed(() => {
-  const raw = activePdfItem.value?.hit.collection || activePdfItem.value?.hit.collection_name
+  const raw = activePdfItem.value?.hit.kb_id || activePdfItem.value?.hit.collection || activePdfItem.value?.hit.collection_name
   return typeof raw === 'string' ? raw : null
+})
+const activePdfBbox = computed(() => {
+  const hit = activePdfItem.value?.hit
+  const box = hit?.bbox || hit?.bboxes?.[0]
+  if (!box) return null
+  const pageWidth = Number(hit?.page_width || 0)
+  const pageHeight = Number(hit?.page_height || 0)
+  const x0 = Number(box.x0)
+  const y0 = Number(box.y0)
+  const x1 = Number(box.x1)
+  const y1 = Number(box.y1)
+  if (![x0, y0, x1, y1, pageWidth, pageHeight].every((v) => Number.isFinite(v) && v >= 0)) {
+    return null
+  }
+  if (pageWidth <= 0 || pageHeight <= 0 || x1 <= x0 || y1 <= y0) return null
+  return {
+    left: `${(x0 / pageWidth) * 100}%`,
+    top: `${(y0 / pageHeight) * 100}%`,
+    width: `${((x1 - x0) / pageWidth) * 100}%`,
+    height: `${((y1 - y0) / pageHeight) * 100}%`,
+  }
 })
 
 async function loadSummary(docId: string) {
@@ -249,7 +270,7 @@ watch(
             {{ t('sources.jumpPage') }}
           </NButton>
         </div>
-        <div class="min-h-0 flex-1 overflow-hidden rounded-[8px] border border-softer bg-surface-2">
+        <div class="relative min-h-0 flex-1 overflow-hidden rounded-[8px] border border-softer bg-surface-2">
           <div v-if="pdfLoading" class="grid h-full place-items-center text-xs text-faint">
             {{ t('common.loading') }}
           </div>
@@ -265,6 +286,15 @@ watch(
             :config="{ src: pdfUrl }"
             @ready="onPdfReady"
           />
+          <div
+            v-if="pdfUrl && activePdfBbox"
+            class="pointer-events-none absolute rounded-[4px] border border-accent bg-accent-soft"
+            :style="activePdfBbox"
+            title="Citation bbox"
+          />
+        </div>
+        <div v-if="activePdfItem?.hit.bbox || activePdfItem?.hit.bboxes?.length" class="mt-2 text-[10px] text-faint">
+          bbox: {{ activePdfItem?.hit.bbox || activePdfItem?.hit.bboxes?.[0] }}
         </div>
       </div>
     </div>

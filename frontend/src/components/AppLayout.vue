@@ -4,6 +4,7 @@ import { useLogto } from '@logto/vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { postLogoutRedirectUri } from '@/auth/logto'
+import { useAuthz } from '@/composables/useAuthz'
 import UserMenuPopover from '@/components/UserMenuPopover.vue'
 
 type UserInfo = {
@@ -16,11 +17,15 @@ type UserInfo = {
 const { t } = useI18n()
 const router = useRouter()
 const { signOut, fetchUserInfo } = useLogto()
+const authz = useAuthz()
 
 const nav = computed(() => [
   { name: 'chat', to: '/chat', icon: 'i-lucide-messages-square', label: t('nav.chat') },
   { name: 'library', to: '/library', icon: 'i-lucide-library-big', label: t('nav.library') },
   { name: 'skills', to: '/skills', icon: 'i-lucide-puzzle', label: t('nav.skills') },
+  ...(authz.isAdmin.value
+    ? [{ name: 'admin', to: '/admin', icon: 'i-lucide-shield-check', label: t('nav.admin') }]
+    : []),
 ])
 
 function displayValue(value?: string | null) {

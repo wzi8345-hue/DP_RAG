@@ -11,28 +11,40 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from ..authz import require_read
-from ..deps import AuthContext, get_pipeline, get_session_store, require_auth
-from ..models import ChatAppendRequest, ChatAppendResponse, ChatRequest, ChatResponse, RunStatusResponse
-from ..session_logger import clear_session_log_context, set_session_log_context
 from ...clients import redis as redis_runtime
 from ...db import repo
 from ...db.models import Message
+from ..authz import require_admin_read, require_manage, require_read
+from ..deps import AuthContext, get_pipeline, get_session_store, require_auth
+from ..models import (
+    ChatAppendRequest,
+    ChatAppendResponse,
+    ChatRequest,
+    ChatResponse,
+    RunStatusResponse,
+)
+from ..session_logger import clear_session_log_context, set_session_log_context
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-def _ensure_collection_readable(collection: str | None, auth: AuthContext) -> None:
+def _resolve_readable_kb_ids(req: ChatRequest, auth: AuthContext) -> list[str]:
     if not repo.available():
-        return
-    if not collection:
-        raise HTTPException(status_code=400, detail="请选择一个可读文献库后再进行 RAG 检索")
-    meta = repo.get_collection(collection)
-    if meta is None:
-        raise HTTPException(status_code=404, detail="知识库不存在或不可读")
-    require_read(auth, meta)
+        return [x for x in ([req.collection] if req.collection else (req.kb_ids or [])) if x]
+    requested = list(req.kb_ids or [])
+    if req.collection and req.collection not in requested:
+        requested.append(req.collection)
+    kb_ids = repo.list_readable_kb_ids(auth, requested_ids=requested or None)
+    if not kb_ids:
+        raise HTTPException(status_code=403, detail="当前用户没有可检索的文献库")
+    return kb_ids
+
+
+def _ensure_collection_readable(collection: str | None, auth: AuthContext) -> None:
+    req = ChatRequest(query="", collection=collection)
+    _resolve_readable_kb_ids(req, auth)
 
 
 def _apply_skill_scope(auth: AuthContext) -> None:
@@ -141,8 +153,7 @@ def _require_run_owner(run_id: str, auth: AuthContext):
     run = repo.get_generation_run(run_id) if repo.available() else None
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    if run.owner_id != auth.user_id:
-        raise HTTPException(status_code=403, detail="No permission for run")
+    require_admin_read(auth, run)
     return run
 
 
@@ -172,7 +183,7 @@ async def append_chat_run(
     if not redis_runtime.configured():
         raise HTTPException(status_code=503, detail="REDIS_URL 未配置")
 
-    _ensure_collection_readable(req.collection, auth)
+    kb_ids = _resolve_readable_kb_ids(req, auth)
     conversation_id, parent_id = _conversation_for_turn(req, auth)
     if not conversation_id:
         raise HTTPException(status_code=500, detail="无法创建 conversation")
@@ -182,7 +193,7 @@ async def append_chat_run(
         user_message_id=req.client_user_message_id,
         parent_id=parent_id,
         query=req.query,
-        params=req.model_dump(exclude={"query"}),
+        params={**req.model_dump(exclude={"query"}), "kb_ids": kb_ids},
     )
     if not user_message_id:
         raise HTTPException(status_code=500, detail="无法创建 user message")
@@ -195,7 +206,7 @@ async def append_chat_run(
             parent_id=user_message_id,
             role="assistant",
             content="",
-            params=req.model_dump(exclude={"query"}),
+            params={**req.model_dump(exclude={"query"}), "kb_ids": kb_ids},
             status="streaming",
         )
     )
@@ -210,7 +221,7 @@ async def append_chat_run(
         assistant_message_id=assistant_message_id,
         owner_id=auth.user_id,
         org_id=auth.org_id,
-        params=req.model_dump(),
+        params={**req.model_dump(), "kb_ids": kb_ids},
         redis_stream=stream_key,
         artifact_prefix=f"runs/{auth.user_id}/{run_id}",
     )
@@ -235,6 +246,14 @@ def get_run_status(
     auth: AuthContext = Depends(require_auth),
 ) -> RunStatusResponse:
     run = _require_run_owner(run_id, auth)
+    if run.owner_id != auth.user_id:
+        repo.append_audit_log(
+            auth=auth,
+            resource_type="generation_run",
+            resource_id=run_id,
+            action="read",
+            target_owner_id=run.owner_id,
+        )
     return RunStatusResponse(
         run_id=run.id,
         conversation_id=run.conversation_id,
@@ -251,10 +270,19 @@ def stop_run(
     run_id: str,
     auth: AuthContext = Depends(require_auth),
 ) -> RunStatusResponse:
-    _require_run_owner(run_id, auth)
+    existing = _require_run_owner(run_id, auth)
+    require_manage(auth, existing)
     run = repo.request_generation_run_stop(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    if existing.owner_id != auth.user_id:
+        repo.append_audit_log(
+            auth=auth,
+            resource_type="generation_run",
+            resource_id=run_id,
+            action="stop",
+            target_owner_id=existing.owner_id,
+        )
     if run.status == "stopped":
         _append_and_publish_event(
             run_id,
@@ -279,7 +307,15 @@ def stream_run(
     auth: AuthContext = Depends(require_auth),
 ) -> StreamingResponse:
     """SSE: replay durable message_events, then tail Redis stream for live events."""
-    _require_run_owner(run_id, auth)
+    run = _require_run_owner(run_id, auth)
+    if run.owner_id != auth.user_id:
+        repo.append_audit_log(
+            auth=auth,
+            resource_type="generation_run",
+            resource_id=run_id,
+            action="stream",
+            target_owner_id=run.owner_id,
+        )
 
     def event_generator():
         last_seq = max(0, int(after_seq or 0))
@@ -340,7 +376,7 @@ async def chat(
     )
     pipe = get_pipeline()
     store = get_session_store()
-    _ensure_collection_readable(req.collection, auth)
+    kb_ids = _resolve_readable_kb_ids(req, auth)
     if req.professional:
         _apply_skill_scope(auth)
     conversation_id, parent_id = _conversation_for_turn(req, auth)
@@ -349,7 +385,7 @@ async def chat(
         user_message_id=req.client_user_message_id,
         parent_id=parent_id,
         query=req.query,
-        params=req.model_dump(exclude={"query"}),
+        params={**req.model_dump(exclude={"query"}), "kb_ids": kb_ids},
     )
 
     # 获取或创建会话
@@ -438,6 +474,7 @@ async def chat_stream(
     pipe = get_pipeline()
     store = get_session_store()
     _ensure_collection_readable(req.collection, auth)
+    kb_ids = _resolve_readable_kb_ids(req, auth)
     if req.professional:
         _apply_skill_scope(auth)
     conversation_id, parent_id = _conversation_for_turn(req, auth)
@@ -481,6 +518,7 @@ async def chat_stream(
                 top_k=req.top_k,
                 professional=req.professional,
                 collection=req.collection,
+                kb_ids=kb_ids,
             ):
                 # 把 session_id 注入 done 事件, 前端据此在流式模式下也能维持多轮
                 if event.get("type") == "done":

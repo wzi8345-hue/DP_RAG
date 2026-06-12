@@ -2,6 +2,8 @@ import { consumeSSE } from './stream'
 import type {
   ChatRequest,
   ChatAppendResponse,
+  AdminMeResponse,
+  AdminResourcesResponse,
   CollectionInfo,
   CollectionsListResponse,
   ConversationGetResponse,
@@ -76,6 +78,34 @@ export class ApiClient {
         headers: await this.headers(false),
       }),
     )
+  }
+
+  async adminMe(): Promise<AdminMeResponse> {
+    return handle(await fetch(this.url('/admin/me'), { headers: await this.headers(false) }))
+  }
+
+  async adminCollections(): Promise<AdminResourcesResponse> {
+    return handle(await fetch(this.url('/admin/resources/collections'), { headers: await this.headers(false) }))
+  }
+
+  async adminConversations(): Promise<AdminResourcesResponse> {
+    return handle(await fetch(this.url('/admin/resources/conversations'), { headers: await this.headers(false) }))
+  }
+
+  async adminSkills(): Promise<AdminResourcesResponse> {
+    return handle(await fetch(this.url('/admin/resources/skills'), { headers: await this.headers(false) }))
+  }
+
+  async adminIngestTasks(): Promise<AdminResourcesResponse> {
+    return handle(await fetch(this.url('/admin/resources/ingest-tasks'), { headers: await this.headers(false) }))
+  }
+
+  async adminGenerationRuns(): Promise<AdminResourcesResponse> {
+    return handle(await fetch(this.url('/admin/resources/generation-runs'), { headers: await this.headers(false) }))
+  }
+
+  async adminAuditLogs(): Promise<AdminResourcesResponse> {
+    return handle(await fetch(this.url('/admin/audit-logs'), { headers: await this.headers(false) }))
   }
 
   // ── 知识库 / 文献 ───────────────────────────────────────

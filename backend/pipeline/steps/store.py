@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional
 
 from .base import BaseStep, StepResult, register_step
 from ..clients.client_registry import get_global_registry
@@ -25,6 +24,7 @@ class StoreStep(BaseStep):
     def run(self, **kwargs) -> StepResult:
         cfg = self.config.milvus
         input_path = kwargs.get("input_path") or cfg.get("input_path", "knowledge_blocks_vec.json")
+        kb_id = kwargs.get("kb_id") or cfg.get("kb_id") or cfg.get("collection", "literature_chunks")
         doc_id = kwargs.get("doc_id") or cfg.get("doc_id")
         doc_name = kwargs.get("doc_name") or cfg.get("doc_name")
         stats_only = kwargs.get("stats_only", False)
@@ -63,6 +63,7 @@ class StoreStep(BaseStep):
 
         result = ingester.ingest_file(
             input_path,
+            kb_id=kb_id,
             doc_id=doc_id,
             doc_name=doc_name,
             purge_existing=True,

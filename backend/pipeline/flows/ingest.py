@@ -272,7 +272,13 @@ class IngestFlow:
     def _record_step(self, name: str, success: bool, elapsed: float = 0.0, error: Optional[str] = None) -> None:
         self._steps.append(IngestStepSummary(step=name, success=success, elapsed=elapsed, error=error))
 
-    def run(self, file_paths: List[str], output_dir: Optional[str] = None, parse_timeout: Optional[int] = None) -> IngestResult:
+    def run(
+        self,
+        file_paths: List[str],
+        output_dir: Optional[str] = None,
+        parse_timeout: Optional[int] = None,
+        kb_id: Optional[str] = None,
+    ) -> IngestResult:
         """完整灌入流程: parse → chunk → embed → store。
 
         Args:
@@ -367,7 +373,12 @@ class IngestFlow:
         # 4) 存入 Milvus
         t0 = time.time()
         try:
-            store_result = self._store(vec_output_path, doc_id=derived_doc_id, doc_name=derived_doc_name)
+            store_result = self._store(
+                vec_output_path,
+                kb_id=kb_id or self.config.milvus.get("kb_id") or self.config.milvus.get("collection"),
+                doc_id=derived_doc_id,
+                doc_name=derived_doc_name,
+            )
             self._record_step("store", True, time.time() - t0)
         except Exception as e:
             self._record_step("store", False, time.time() - t0, str(e))
@@ -771,7 +782,9 @@ class IngestFlow:
                          else self.config.milvus.get("recreate", False))
         if is_append and skip_existing:
             try:
-                existing_doc_ids = self._get_ingester().list_doc_ids()
+                existing_doc_ids = self._get_ingester().list_doc_ids(
+                    kb_id=self.config.milvus.get("kb_id") or self.config.milvus.get("collection")
+                )
             except Exception as e:
                 logger.warning(f"[reingest] 查询已有 doc_id 失败, 无法跳过: {e}")
 
@@ -801,6 +814,7 @@ class IngestFlow:
                 # 由 ingest_file 从 sidecar 还原 (复现真实标题等)。
                 r = self._get_ingester().ingest_file(
                     vec_path,
+                    kb_id=self.config.milvus.get("kb_id") or self.config.milvus.get("collection"),
                     doc_id=derived_doc_id,
                     purge_existing=True,
                     batch_size=cfg.get("batch_size", 100),
@@ -899,7 +913,12 @@ class IngestFlow:
             derived_doc_name = derived_doc_id
         t0 = time.time()
         try:
-            store_result = self._store(vec_output_path, doc_id=derived_doc_id, doc_name=derived_doc_name)
+            store_result = self._store(
+                vec_output_path,
+                kb_id=self.config.milvus.get("kb_id") or self.config.milvus.get("collection"),
+                doc_id=derived_doc_id,
+                doc_name=derived_doc_name,
+            )
             self._record_step("store", True, time.time() - t0)
         except Exception as e:
             self._record_step("store", False, time.time() - t0, str(e))
@@ -992,7 +1011,6 @@ class IngestFlow:
         cfg = self.config.chunking
         output_path = output_path or cfg.get("output_path", "knowledge_blocks.json")
         summary_title_count = cfg.get("summary_title_count", 2)
-        summary_sim_threshold = cfg.get("summary_sim_threshold", 0.72)
         split_cfg = cfg.get("semantic_split", {}) or {}
 
         content_list_path = cfg.get("content_list_path") or autodiscover_content_list_v2(mineru_output_dir)
@@ -1064,7 +1082,6 @@ class IngestFlow:
         """
         cfg = self.config.chunking
         output_path = output_path or cfg.get("output_path", "knowledge_blocks.json")
-        summary_sim_threshold = cfg.get("summary_sim_threshold", 0.72)
         split_cfg = cfg.get("semantic_split", {}) or {}
         uni_cfg = cfg.get("uniparser", {}) or {}
 
@@ -1169,15 +1186,23 @@ class IngestFlow:
             "embedding_dim": dim,
         }
 
-    def _store(self, input_path: str, doc_id: Optional[str] = None, doc_name: Optional[str] = None) -> Dict[str, Any]:
+    def _store(
+        self,
+        input_path: str,
+        kb_id: Optional[str] = None,
+        doc_id: Optional[str] = None,
+        doc_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """步骤 4: 将向量化的知识块灌入 Milvus。"""
         cfg = self.config.milvus
         doc_id = doc_id or cfg.get("doc_id")
         doc_name = doc_name or cfg.get("doc_name")
+        kb_id = kb_id or cfg.get("kb_id") or cfg.get("collection")
         ingester = self._get_ingester()
 
         result = ingester.ingest_file(
             input_path,
+            kb_id=kb_id,
             doc_id=doc_id,
             doc_name=doc_name,
             purge_existing=True,

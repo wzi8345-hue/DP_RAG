@@ -89,6 +89,9 @@ services:
       LOGTO_JWKS_URI: ${LOGTO_JWKS_URI}
       LOGTO_AUDIENCE: ${LOGTO_AUDIENCE}
       LOGTO_REQUIRED_SCOPE: ${LOGTO_REQUIRED_SCOPE:-all:data}
+      LOGTO_ROLE_USER: ${LOGTO_ROLE_USER:-sci-loop-user}
+      LOGTO_ROLE_ADMIN: ${LOGTO_ROLE_ADMIN:-sci-loop-admin}
+      LOGTO_ROLE_ROOT: ${LOGTO_ROLE_ROOT:-sci-loop-root}
       AUTH_DISABLED: ${AUTH_DISABLED:-0}
       DATABASE_URL: ${DATABASE_URL}
       UPLOAD_DIR: ${UPLOAD_DIR:-/data/uploads}
@@ -271,6 +274,9 @@ services:
       context: ../frontend
       args:
         VITE_API_BASE: ${LOGTO_AUDIENCE:-https://funmg.dp.tech/sci-loop-api}
+        VITE_LOGTO_ROLE_USER: ${LOGTO_ROLE_USER:-sci-loop-user}
+        VITE_LOGTO_ROLE_ADMIN: ${LOGTO_ROLE_ADMIN:-sci-loop-admin}
+        VITE_LOGTO_ROLE_ROOT: ${LOGTO_ROLE_ROOT:-sci-loop-root}
     restart: unless-stopped
     profiles: ['selfhost']
     ports:

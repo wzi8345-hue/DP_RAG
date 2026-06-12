@@ -6,13 +6,24 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..authz import require_read
 from ..deps import AuthContext, get_pipeline, require_auth
 from ..models import QueryRequest, QueryResponse
 from ..session_logger import clear_session_log_context, set_session_log_context
 from ...db import repo
 
 router = APIRouter()
+
+
+def _resolve_readable_kb_ids(req: QueryRequest, auth: AuthContext) -> list[str]:
+    if not repo.available():
+        return [x for x in ([req.collection] if req.collection else (req.kb_ids or [])) if x]
+    requested = list(req.kb_ids or [])
+    if req.collection and req.collection not in requested:
+        requested.append(req.collection)
+    kb_ids = repo.list_readable_kb_ids(auth, requested_ids=requested or None)
+    if not kb_ids:
+        raise HTTPException(status_code=403, detail="当前用户没有可检索的文献库")
+    return kb_ids
 
 
 def _apply_skill_scope(auth: AuthContext) -> None:
@@ -38,13 +49,7 @@ async def query(
 ) -> QueryResponse:
     """单次查询: retrieve → generate, 返回完整结果。"""
     pipe = get_pipeline()
-    if repo.available():
-        if not req.collection:
-            raise HTTPException(status_code=400, detail="请选择一个可读文献库后再进行 RAG 检索")
-        meta = repo.get_collection(req.collection)
-        if meta is None:
-            raise HTTPException(status_code=404, detail="知识库不存在或不可读")
-        require_read(auth, meta)
+    kb_ids = _resolve_readable_kb_ids(req, auth)
     if req.professional:
         _apply_skill_scope(auth)
     # 单次 query 用 correlation_id 的前缀作为日志 session 标识
@@ -58,9 +63,10 @@ async def query(
             mode=req.mode,
             top_k=req.top_k,
             stream=False,
-            use_agentic=req.use_agentic,
-            professional=req.professional,
+            use_agentic=False,
+            professional=False,
             collection=req.collection,
+            kb_ids=kb_ids,
         )
     finally:
         clear_session_log_context()

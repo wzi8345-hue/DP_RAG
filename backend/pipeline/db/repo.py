@@ -11,14 +11,15 @@ from psycopg.types.json import Jsonb
 from ..auth import AuthContext
 from . import base
 from .models import (
+    AuditLog,
     Conversation,
     ConversationShare,
     Document,
     GenerationRun,
+    IngestItemStatus,
     IngestTask,
     IngestTaskEvent,
     IngestTaskItem,
-    IngestItemStatus,
     IngestTaskStatus,
     KbCollection,
     Message,
@@ -35,6 +36,24 @@ def _model(model, row):
 
 def _json(value: Any) -> Jsonb | None:
     return Jsonb(value) if value is not None else None
+
+
+def _admin_params(auth: AuthContext) -> dict[str, Any]:
+    return {
+        "user_id": auth.user_id,
+        "org_id": auth.org_id,
+        "is_admin": auth.role == "admin",
+        "is_root": auth.is_root,
+    }
+
+
+def _admin_scope_sql(alias: str = "") -> str:
+    prefix = f"{alias}." if alias else ""
+    return (
+        f"(%(is_root)s "
+        f"OR {prefix}owner_id = %(user_id)s "
+        f"OR (%(is_admin)s AND {prefix}org_id IS NOT NULL AND {prefix}org_id = %(org_id)s))"
+    )
 
 
 def available() -> bool:
@@ -102,6 +121,40 @@ def list_collections(auth: AuthContext) -> list[KbCollection]:
         return [KbCollection.model_validate(r) for r in cur.fetchall()]
 
 
+def list_readable_kb_ids(
+    auth: AuthContext,
+    requested_ids: list[str] | None = None,
+) -> list[str]:
+    params: dict[str, Any] = {"user_id": auth.user_id, "org_id": auth.org_id}
+    requested = [x for x in (requested_ids or []) if x]
+    requested_clause = ""
+    if requested:
+        requested_clause = "AND name = ANY(%(requested_ids)s)"
+        params["requested_ids"] = requested
+    with base.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT name FROM kb_collections
+            WHERE (
+                owner_id = %(user_id)s
+                OR visibility = 'public'
+                OR (visibility = 'org' AND org_id IS NOT NULL AND org_id = %(org_id)s)
+            )
+            {requested_clause}
+            ORDER BY
+              CASE
+                WHEN owner_id = %(user_id)s THEN 0
+                WHEN visibility = 'org' THEN 1
+                WHEN visibility = 'public' THEN 2
+                ELSE 3
+              END,
+              updated_at DESC
+            """,
+            params,
+        )
+        return [str(r["name"]) for r in cur.fetchall()]
+
+
 def update_collection_visibility(name: str, visibility: Visibility, auth: AuthContext) -> KbCollection | None:
     with base.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -116,6 +169,20 @@ def update_collection_visibility(name: str, visibility: Visibility, auth: AuthCo
         return _model(KbCollection, cur.fetchone())
 
 
+def update_collection_visibility_as(name: str, visibility: Visibility) -> KbCollection | None:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE kb_collections
+            SET visibility = %(visibility)s, updated_at = now()
+            WHERE name = %(name)s
+            RETURNING *
+            """,
+            {"name": name, "visibility": visibility},
+        )
+        return _model(KbCollection, cur.fetchone())
+
+
 def delete_collection_metadata(name: str, auth: AuthContext) -> bool:
     with base.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -123,6 +190,25 @@ def delete_collection_metadata(name: str, auth: AuthContext) -> bool:
             (name, auth.user_id),
         )
         return cur.rowcount > 0
+
+
+def delete_collection_metadata_as(name: str) -> bool:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM kb_collections WHERE name = %s", (name,))
+        return cur.rowcount > 0
+
+
+def list_admin_collections(auth: AuthContext) -> list[KbCollection]:
+    with base.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT * FROM kb_collections
+            WHERE {_admin_scope_sql()}
+            ORDER BY updated_at DESC
+            """,
+            _admin_params(auth),
+        )
+        return [KbCollection.model_validate(r) for r in cur.fetchall()]
 
 
 def upsert_document(
@@ -233,6 +319,15 @@ def list_documents(collection_name: str, auth: AuthContext) -> list[Document]:
         return [Document.model_validate(r) for r in cur.fetchall()]
 
 
+def list_documents_as(collection_name: str) -> list[Document]:
+    with base.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM documents WHERE collection_name = %s ORDER BY updated_at DESC",
+            (collection_name,),
+        )
+        return [Document.model_validate(r) for r in cur.fetchall()]
+
+
 def delete_document(collection_name: str, doc_id: str, auth: AuthContext) -> bool:
     with base.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -245,6 +340,15 @@ def delete_document(collection_name: str, doc_id: str, auth: AuthContext) -> boo
               AND c.owner_id = %(owner_id)s
             """,
             {"collection_name": collection_name, "doc_id": doc_id, "owner_id": auth.user_id},
+        )
+        return cur.rowcount > 0
+
+
+def delete_document_as(collection_name: str, doc_id: str) -> bool:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM documents WHERE collection_name = %s AND doc_id = %s",
+            (collection_name, doc_id),
         )
         return cur.rowcount > 0
 
@@ -343,6 +447,37 @@ def find_readable_skill(skill_id: str, auth: AuthContext) -> UserSkill | None:
         return _model(UserSkill, cur.fetchone())
 
 
+def find_manageable_skill(skill_id: str, auth: AuthContext, owner_id: str | None = None) -> UserSkill | None:
+    params = {**_admin_params(auth), "id": skill_id, "owner_id": owner_id}
+    owner_clause = "AND owner_id = %(owner_id)s" if owner_id else ""
+    with base.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT * FROM user_skills
+            WHERE id = %(id)s
+              {owner_clause}
+              AND {_admin_scope_sql()}
+            ORDER BY owner_id = %(user_id)s DESC, updated_at DESC
+            LIMIT 1
+            """,
+            params,
+        )
+        return _model(UserSkill, cur.fetchone())
+
+
+def list_admin_skill_metadata(auth: AuthContext) -> list[UserSkill]:
+    with base.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT * FROM user_skills
+            WHERE {_admin_scope_sql()}
+            ORDER BY updated_at DESC
+            """,
+            _admin_params(auth),
+        )
+        return [UserSkill.model_validate(r) for r in cur.fetchall()]
+
+
 def update_skill_visibility(skill_id: str, visibility: Visibility, auth: AuthContext) -> UserSkill | None:
     with base.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -357,11 +492,34 @@ def update_skill_visibility(skill_id: str, visibility: Visibility, auth: AuthCon
         return _model(UserSkill, cur.fetchone())
 
 
+def update_skill_visibility_as(owner_id: str, skill_id: str, visibility: Visibility) -> UserSkill | None:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE user_skills
+            SET visibility = %(visibility)s, updated_at = now()
+            WHERE owner_id = %(owner_id)s AND id = %(id)s
+            RETURNING *
+            """,
+            {"owner_id": owner_id, "id": skill_id, "visibility": visibility},
+        )
+        return _model(UserSkill, cur.fetchone())
+
+
 def delete_skill_metadata(skill_id: str, auth: AuthContext) -> bool:
     with base.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "DELETE FROM user_skills WHERE owner_id = %s AND id = %s",
             (auth.user_id, skill_id),
+        )
+        return cur.rowcount > 0
+
+
+def delete_skill_metadata_as(owner_id: str, skill_id: str) -> bool:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM user_skills WHERE owner_id = %s AND id = %s",
+            (owner_id, skill_id),
         )
         return cur.rowcount > 0
 
@@ -459,6 +617,19 @@ def list_conversations(auth: AuthContext) -> list[Conversation]:
         return [Conversation.model_validate(r) for r in cur.fetchall()]
 
 
+def list_admin_conversations(auth: AuthContext) -> list[Conversation]:
+    with base.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT * FROM conversations
+            WHERE {_admin_scope_sql()}
+            ORDER BY updated_at DESC
+            """,
+            _admin_params(auth),
+        )
+        return [Conversation.model_validate(r) for r in cur.fetchall()]
+
+
 def update_conversation_visibility(
     conversation_id: str,
     visibility: Visibility,
@@ -473,6 +644,20 @@ def update_conversation_visibility(
             RETURNING *
             """,
             {"id": conversation_id, "owner_id": auth.user_id, "visibility": visibility},
+        )
+        return _model(Conversation, cur.fetchone())
+
+
+def update_conversation_visibility_as(conversation_id: str, visibility: Visibility) -> Conversation | None:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE conversations
+            SET visibility = %(visibility)s, updated_at = now()
+            WHERE id = %(id)s
+            RETURNING *
+            """,
+            {"id": conversation_id, "visibility": visibility},
         )
         return _model(Conversation, cur.fetchone())
 
@@ -667,6 +852,20 @@ def get_generation_run(run_id: str) -> GenerationRun | None:
     with base.cursor() as cur:
         cur.execute("SELECT * FROM generation_runs WHERE id = %s", (run_id,))
         return _model(GenerationRun, cur.fetchone())
+
+
+def list_admin_generation_runs(auth: AuthContext, limit: int = 200) -> list[GenerationRun]:
+    with base.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT * FROM generation_runs
+            WHERE {_admin_scope_sql()}
+            ORDER BY created_at DESC
+            LIMIT %(limit)s
+            """,
+            {**_admin_params(auth), "limit": limit},
+        )
+        return [GenerationRun.model_validate(r) for r in cur.fetchall()]
 
 
 def mark_generation_run_running(run_id: str) -> GenerationRun | None:
@@ -971,6 +1170,20 @@ def get_ingest_task(task_id: str) -> IngestTask | None:
         return _model(IngestTask, cur.fetchone())
 
 
+def list_admin_ingest_tasks(auth: AuthContext, limit: int = 200) -> list[IngestTask]:
+    with base.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT * FROM ingest_tasks
+            WHERE {_admin_scope_sql()}
+            ORDER BY created_at DESC
+            LIMIT %(limit)s
+            """,
+            {**_admin_params(auth), "limit": limit},
+        )
+        return [IngestTask.model_validate(r) for r in cur.fetchall()]
+
+
 def list_ingest_task_items(task_id: str) -> list[IngestTaskItem]:
     with base.cursor() as cur:
         cur.execute(
@@ -1181,3 +1394,62 @@ def list_ingest_task_events(
             {"task_id": task_id, "after_seq": after_seq, "limit": limit},
         )
         return [IngestTaskEvent.model_validate(r) for r in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Audit logs
+# ---------------------------------------------------------------------------
+
+
+def append_audit_log(
+    *,
+    auth: AuthContext,
+    resource_type: str,
+    resource_id: str,
+    action: str,
+    target_owner_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> AuditLog:
+    with base.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO audit_logs(
+              actor_id, actor_role, actor_org_id, target_owner_id,
+              resource_type, resource_id, action, metadata
+            )
+            VALUES (
+              %(actor_id)s, %(actor_role)s, %(actor_org_id)s, %(target_owner_id)s,
+              %(resource_type)s, %(resource_id)s, %(action)s, %(metadata)s
+            )
+            RETURNING *
+            """,
+            {
+                "actor_id": auth.user_id,
+                "actor_role": auth.role,
+                "actor_org_id": auth.org_id,
+                "target_owner_id": target_owner_id,
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+                "action": action,
+                "metadata": _json(metadata),
+            },
+        )
+        return AuditLog.model_validate(cur.fetchone())
+
+
+def list_audit_logs(auth: AuthContext, limit: int = 200) -> list[AuditLog]:
+    where = ""
+    params = {**_admin_params(auth), "limit": limit}
+    if not auth.is_root:
+        where = "WHERE actor_org_id = %(org_id)s OR target_owner_id = %(user_id)s"
+    with base.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT * FROM audit_logs
+            {where}
+            ORDER BY created_at DESC
+            LIMIT %(limit)s
+            """,
+            params,
+        )
+        return [AuditLog.model_validate(r) for r in cur.fetchall()]

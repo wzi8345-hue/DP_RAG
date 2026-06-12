@@ -8,6 +8,7 @@ export type RetrievalSourceKey = 'literature' | 'enterprise_sql'
 
 export interface Hit {
   pk?: string
+  kb_id?: string
   chunk_id?: string
   doc_id?: string
   doc_name?: string
@@ -16,6 +17,10 @@ export interface Hit {
   page_start?: number
   paragraph_index?: number
   publication_year?: number
+  bbox?: Record<string, number>
+  bboxes?: Array<Record<string, number>>
+  page_width?: number
+  page_height?: number
   content?: string
   context?: string
   related_assets?: Array<Record<string, unknown>>
@@ -53,6 +58,8 @@ export interface ChatRequest {
   professional?: boolean
   /** 单库检索；为空用默认库 */
   collection?: string | null
+  /** 可选高级筛选；为空表示全部可访问知识 */
+  kb_ids?: string[] | null
   /** 限定到具体文献（预留：后端需支持 doc_id 过滤） */
   doc_ids?: string[] | null
   /** 是否启用文献检索（关闭则纯生成） */
@@ -136,6 +143,7 @@ export interface CollectionInfo {
   visibility?: Visibility
   mine?: boolean
   org_id?: string | null
+  can_manage?: boolean
 }
 
 export interface CollectionsListResponse {
@@ -229,6 +237,7 @@ export interface SkillSummary extends SkillSpec {
   org_id?: string | null
   visibility?: Visibility
   mine?: boolean
+  can_manage?: boolean
 }
 
 export interface SkillListResponse {
@@ -299,6 +308,7 @@ export interface BackendConversationPayload {
   activeLeafId?: string | null
   updatedAt?: number
   ownerId?: string | null
+  orgId?: string | null
   mine?: boolean
   forkedFrom?: string | null
 }
@@ -326,4 +336,57 @@ export interface ConversationShareResponse {
 export interface ResourceCopyResponse {
   id: string
   name?: string | null
+}
+
+export type AuthzRole = 'user' | 'admin' | 'root'
+
+export interface AdminMeResponse {
+  user_id: string
+  org_id?: string | null
+  role: AuthzRole
+  organizations: string[]
+  organization_roles: string[]
+  is_admin: boolean
+  is_root: boolean
+}
+
+export interface AdminAuditLog {
+  id: number
+  actor_id: string
+  actor_role: string
+  actor_org_id?: string | null
+  target_owner_id?: string | null
+  resource_type: string
+  resource_id: string
+  action: string
+  metadata?: Record<string, unknown> | null
+  created_at?: string | null
+}
+
+export interface AdminIngestTask extends Omit<IngestTask, 'items' | 'created_at'> {
+  owner_id: string
+  org_id?: string | null
+  created_at?: string | null
+}
+
+export interface AdminGenerationRun {
+  id: string
+  conversation_id: string
+  user_message_id: string
+  assistant_message_id: string
+  owner_id: string
+  org_id?: string | null
+  status: string
+  error?: string | null
+  cancel_requested: boolean
+  created_at?: string | null
+}
+
+export interface AdminResourcesResponse {
+  collections?: CollectionInfo[]
+  conversations?: BackendConversationPayload[]
+  skills?: SkillSummary[]
+  tasks?: AdminIngestTask[]
+  runs?: AdminGenerationRun[]
+  logs?: AdminAuditLog[]
 }

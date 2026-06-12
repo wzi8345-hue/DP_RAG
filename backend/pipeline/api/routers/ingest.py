@@ -6,25 +6,25 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
-from ..authz import require_write
+from ...clients import object_store
+from ...clients import redis as redis_runtime
+from ...db import repo
+from ...flows.ingest import IngestResult
+from ..authz import require_admin_read, require_manage, require_write
 from ..deps import AuthContext, get_pipeline, get_task_store, require_auth
 from ..models import (
     IngestRequest,
     IngestTaskItemResponse,
     IngestTaskResponse,
-    ParseRequest,
     LoadVecRequest,
+    ParseRequest,
     TaskResponse,
 )
-from ...clients import object_store
-from ...clients import redis as redis_runtime
-from ...db import repo
-from ...flows.ingest import IngestResult
 from .collections import (
     _kb_meta_path,
     _write_kb_meta,
@@ -89,7 +89,7 @@ def _append_and_publish_ingest_event(task_id: str, event_type: str, payload: dic
         redis_runtime.get_redis_runtime().publish_ingest_event(task_id, live)
 
 
-def _ingest_rebuild(task_id: str, directory: str) -> Dict[str, Any]:
+def _ingest_rebuild(task_id: str, directory: str) -> dict[str, Any]:
     pipe = get_pipeline()
     task_store = get_task_store()
 
@@ -103,7 +103,7 @@ def _ingest_rebuild(task_id: str, directory: str) -> Dict[str, Any]:
     return _summarize_ingest(results)
 
 
-def _ingest_append(task_id: str, directory: str, skip_existing: bool) -> Dict[str, Any]:
+def _ingest_append(task_id: str, directory: str, skip_existing: bool) -> dict[str, Any]:
     pipe = get_pipeline()
     task_store = get_task_store()
 
@@ -117,20 +117,20 @@ def _ingest_append(task_id: str, directory: str, skip_existing: bool) -> Dict[st
     return _summarize_ingest(results)
 
 
-def _ingest_parse(task_id: str, path: str, output_dir: str | None, backend: str | None, timeout: int) -> Dict[str, Any]:
+def _ingest_parse(task_id: str, path: str, output_dir: str | None, backend: str | None, timeout: int) -> dict[str, Any]:
     pipe = get_pipeline()
     results = pipe.parse([path], output_dir=output_dir, parse_timeout=timeout, backend=backend)
     return _summarize_ingest([results])
 
 
-def _ingest_load_vec(task_id: str, path: str, recreate: bool, purge: bool, skip: bool) -> Dict[str, Any]:
+def _ingest_load_vec(task_id: str, path: str, recreate: bool, purge: bool, skip: bool) -> dict[str, Any]:
     pipe = get_pipeline()
     results = pipe.load_vec(path, recreate=recreate, purge_existing=purge, skip_existing=skip)
     total = sum(int(r.get("count", 0) or 0) for r in results)
     return {"files_loaded": len(results), "total_chunks": total}
 
 
-def _summarize_ingest(results: List[IngestResult]) -> Dict[str, Any]:
+def _summarize_ingest(results: list[IngestResult]) -> dict[str, Any]:
     success = sum(1 for r in results if r.steps and all(s.success for s in r.steps))
     failed = len(results) - success
     return {
@@ -173,7 +173,8 @@ def ingest_rebuild(
     _auth: str = Depends(require_auth),
 ) -> TaskResponse:
     """全量重灌 (异步): 清空集合 → 逐篇灌入。"""
-    import uuid, time as _time
+    import time as _time
+    import uuid
     task_store = get_task_store()
     tid = uuid.uuid4().hex[:16]
     task_store.submit(_ingest_rebuild, tid, req.directory, task_id=tid)
@@ -187,7 +188,8 @@ def ingest_append(
 ) -> TaskResponse:
     """增量追加 (异步): 不清空集合, 同名 doc_id 覆盖。"""
     task_store = get_task_store()
-    import uuid, time as _time
+    import time as _time
+    import uuid
     tid = uuid.uuid4().hex[:16]
     task_store.submit(
         _ingest_append, tid, req.directory, req.skip_existing, task_id=tid,
@@ -202,7 +204,8 @@ def ingest_parse(
 ) -> TaskResponse:
     """仅解析 PDF (异步): 不做 chunk/embed/store。"""
     task_store = get_task_store()
-    import uuid, time as _time
+    import time as _time
+    import uuid
     tid = uuid.uuid4().hex[:16]
     task_store.submit(
         _ingest_parse, tid, req.path, req.output_dir, req.backend, req.timeout,
@@ -218,7 +221,8 @@ def ingest_load_vec(
 ) -> TaskResponse:
     """直接灌入已向量化文件 (异步): 跳过 parse/chunk/embed。"""
     task_store = get_task_store()
-    import uuid, time as _time
+    import time as _time
+    import uuid
     tid = uuid.uuid4().hex[:16]
     task_store.submit(
         _ingest_load_vec, tid, req.path, req.recreate, req.purge_existing, req.skip_existing,
@@ -267,8 +271,15 @@ def get_ingest_task(
     task = repo.get_ingest_task(task_id) if repo.available() else None
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    require_admin_read(auth, task)
     if task.owner_id != auth.user_id:
-        raise HTTPException(status_code=403, detail="No permission for task")
+        repo.append_audit_log(
+            auth=auth,
+            resource_type="ingest_task",
+            resource_id=task_id,
+            action="read",
+            target_owner_id=task.owner_id,
+        )
     return _ingest_task_payload(task_id)
 
 
@@ -280,9 +291,16 @@ def cancel_ingest_task(
     task = repo.get_ingest_task(task_id) if repo.available() else None
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.owner_id != auth.user_id:
-        raise HTTPException(status_code=403, detail="No permission for task")
+    require_manage(auth, task)
     repo.request_ingest_task_cancel(task_id)
+    if task.owner_id != auth.user_id:
+        repo.append_audit_log(
+            auth=auth,
+            resource_type="ingest_task",
+            resource_id=task_id,
+            action="cancel",
+            target_owner_id=task.owner_id,
+        )
     _append_and_publish_ingest_event(
         task_id,
         "status",
@@ -300,8 +318,15 @@ def stream_ingest_task(
     task = repo.get_ingest_task(task_id) if repo.available() else None
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    require_admin_read(auth, task)
     if task.owner_id != auth.user_id:
-        raise HTTPException(status_code=403, detail="No permission for task")
+        repo.append_audit_log(
+            auth=auth,
+            resource_type="ingest_task",
+            resource_id=task_id,
+            action="stream",
+            target_owner_id=task.owner_id,
+        )
 
     def event_generator():
         last_seq = max(0, int(after_seq or 0))
@@ -355,11 +380,11 @@ def stream_ingest_task(
 
 def _ingest_upload(
     task_id: str,
-    items: List[tuple],
+    items: list[tuple],
     collection: str,
     backend: str | None,
-    skipped_existing: List[str] | None = None,
-) -> Dict[str, Any]:
+    skipped_existing: list[str] | None = None,
+) -> dict[str, Any]:
     """后台任务: 将已上传的 PDF 灌入指定集合。
 
     items: [(pdf_path, doc_dir, doc_id, filename, owner_id, pdf_object_key, artifact_prefix)],
@@ -446,7 +471,7 @@ def _ingest_upload(
 async def ingest_upload(
     collection: str = Form(...),
     backend: str = Form(None),
-    files: List[UploadFile] = File(...),
+    files: list[UploadFile] = File(...),
     auth: AuthContext = Depends(require_auth),
 ) -> TaskResponse:
     """上传 PDF + 自动灌入到指定知识库 (异步任务)。
@@ -458,8 +483,8 @@ async def ingest_upload(
     断点续传: 同一知识库再次上传时, 按 PDF 文件名 (= doc_id) 跳过集合中
     已入库的文献, 只灌未入库的; 中断 (未入库) 的文献复用同一目录续灌。
     """
-    import uuid
     import time as _time
+    import uuid
 
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
@@ -513,8 +538,8 @@ async def ingest_upload(
         existing_doc_ids = set()
 
     # 每篇 PDF 一个独立子目录, 保存原始 PDF; 已入库的 (同名 doc_id) 直接跳过
-    items: List[tuple] = []
-    skipped_existing: List[str] = []
+    items: list[tuple] = []
+    skipped_existing: list[str] = []
     for f in files:
         # 用确定性 stem: 同一文件名恒映射到同一 doc_id, 不追加 _2 后缀
         doc_stem = sanitized_doc_stem(f.filename or "document.pdf")

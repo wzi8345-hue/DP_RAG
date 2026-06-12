@@ -6,7 +6,7 @@ import os
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..authz import require_read
+from ..authz import require_manage, require_read, require_visibility_allowed
 from ..deps import AuthContext, require_auth
 from ..models import (
     ConversationCopyRequest,
@@ -89,9 +89,23 @@ def set_conversation_visibility(
 ) -> dict:
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
-    updated = repo.update_conversation_visibility(conversation_id, req.visibility, auth)
+    require_visibility_allowed(auth, req.visibility)
+    conv = repo.get_conversation(conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="未找到可写的对话")
+    require_manage(auth, conv)
+    updated = repo.update_conversation_visibility_as(conversation_id, req.visibility)
     if updated is None:
         raise HTTPException(status_code=404, detail="未找到可写的对话")
+    if conv.owner_id != auth.user_id:
+        repo.append_audit_log(
+            auth=auth,
+            resource_type="conversation",
+            resource_id=conversation_id,
+            action="set_visibility",
+            target_owner_id=conv.owner_id,
+            metadata={"visibility": req.visibility},
+        )
     return {"updated": True, "conversation_id": conversation_id, "visibility": updated.visibility}
 
 

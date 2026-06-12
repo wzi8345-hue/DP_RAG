@@ -3,11 +3,13 @@ import { computed, h, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NButton, NDataTable, NInput, type DataTableColumns } from 'naive-ui'
 import { useApi } from '@/composables/useApi'
+import { useAuthz } from '@/composables/useAuthz'
 import WorkspaceSplit from '@/components/WorkspaceSplit.vue'
-import type { CollectionInfo, DocumentInfo, IngestTask, TaskResponse } from '@/api/types'
+import type { CollectionInfo, DocumentInfo, IngestTask, TaskResponse, Visibility } from '@/api/types'
 
 const { t } = useI18n()
 const api = useApi()
+const authz = useAuthz()
 
 const collections = ref<CollectionInfo[]>([])
 const loading = ref(false)
@@ -25,7 +27,7 @@ const currentIngestTask = ref<IngestTask | null>(null)
 let ingestAbort: AbortController | null = null
 
 const selectedInfo = computed(() => collections.value.find((c) => c.name === selected.value) || null)
-const canWriteSelected = computed(() => selectedInfo.value?.mine !== false)
+const canWriteSelected = computed(() => Boolean(selectedInfo.value?.can_manage ?? selectedInfo.value?.mine))
 const groupedCollections = computed(() => [
   {
     key: 'public',
@@ -99,7 +101,10 @@ async function rebuild(name: string) {
 }
 
 async function toggleVisibility(c: CollectionInfo) {
-  const next = c.visibility === 'private' ? 'org' : c.visibility === 'org' ? 'public' : 'private'
+  const next: Visibility =
+    c.visibility === 'private'
+      ? authz.canUseOrgVisibility.value ? 'org' : 'public'
+      : c.visibility === 'org' ? 'public' : 'private'
   try {
     await api.setCollectionVisibility(c.name, next)
     await loadCollections()
@@ -252,17 +257,19 @@ const docColumns = computed<DataTableColumns<DocumentInfo>>(() => [
     width: 48,
     align: 'right',
     render: (row) =>
-      h(
-        NButton,
-        {
-          quaternary: true,
-          circle: true,
-          size: 'small',
-          title: t('common.delete'),
-          onClick: () => removeDoc(row.doc_id),
-        },
-        { icon: () => h('span', { class: 'i-lucide-trash-2 text-sm text-red-500' }) },
-      ),
+      canWriteSelected.value
+        ? h(
+            NButton,
+            {
+              quaternary: true,
+              circle: true,
+              size: 'small',
+              title: t('common.delete'),
+              onClick: () => removeDoc(row.doc_id),
+            },
+            { icon: () => h('span', { class: 'i-lucide-trash-2 text-sm text-red-500' }) },
+          )
+        : null,
   },
 ])
 </script>
@@ -343,7 +350,7 @@ const docColumns = computed<DataTableColumns<DocumentInfo>>(() => [
               </template>
             </NButton>
             <NButton
-              v-else
+              v-if="c.can_manage"
               class="shrink-0 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
               quaternary
               circle

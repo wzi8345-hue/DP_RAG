@@ -41,6 +41,7 @@ class QueryRequest(BaseModel):
     use_agentic: bool = True
     professional: bool = False  # 专业研究模式: 多轮递进式文献检索 + 综述综合
     collection: Optional[str] = None  # 目标 Milvus 集合 (None = 使用配置默认)
+    kb_ids: list[str] | None = None
 
 
 class QueryResponse(BaseModel):
@@ -74,6 +75,7 @@ class ChatRequest(BaseModel):
     stream: bool = False
     professional: bool = False  # 专业研究模式: 多轮递进式文献检索 + 综述综合
     collection: Optional[str] = None  # 目标 Milvus 集合 (None = 使用配置默认)
+    kb_ids: list[str] | None = None
     conversation_id: Optional[str] = None
     parent_message_id: Optional[str] = None
     client_user_message_id: Optional[str] = None
@@ -233,6 +235,7 @@ class CollectionInfo(BaseModel):
     org_id: str | None = None
     visibility: Visibility = "private"
     mine: bool = False
+    can_manage: bool = False
 
 
 class CollectionsListResponse(BaseModel):
@@ -296,6 +299,7 @@ class SkillSummary(BaseModel):
     org_id: str | None = None
     visibility: Visibility = "private"
     mine: bool = False
+    can_manage: bool = False
 
 
 class SkillListResponse(BaseModel):

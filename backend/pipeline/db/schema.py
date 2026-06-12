@@ -220,4 +220,22 @@ SCHEMA_STATEMENTS: list[str] = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_conversation_shares_conv ON conversation_shares(conversation_id)",
     "CREATE INDEX IF NOT EXISTS idx_conversation_shares_owner ON conversation_shares(owner_id)",
+    # ── 管理审计日志 ────────────────────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id              bigserial PRIMARY KEY,
+        actor_id        text NOT NULL,
+        actor_role      text NOT NULL,
+        actor_org_id    text,
+        target_owner_id text,
+        resource_type   text NOT NULL,
+        resource_id     text NOT NULL,
+        action          text NOT NULL,
+        metadata        jsonb,
+        created_at      timestamptz NOT NULL DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_id)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, resource_id)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at)",
 ]

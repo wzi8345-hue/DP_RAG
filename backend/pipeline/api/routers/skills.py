@@ -11,6 +11,8 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from ...db import repo
+from ..authz import can_manage, require_delete, require_manage, require_visibility_allowed
 from ..deps import AuthContext, get_pipeline, require_auth
 from ..models import (
     ResourceCopyRequest,
@@ -22,7 +24,6 @@ from ..models import (
     SkillSummary,
     VisibilityRequest,
 )
-from ...db import repo
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +72,11 @@ def list_skills(auth: AuthContext = Depends(require_auth)) -> SkillListResponse:
                     "visibility": meta.visibility,
                     "mine": meta.owner_id == auth.user_id,
                     "editable": meta.owner_id == auth.user_id,
+                    "can_manage": can_manage(auth, meta),
                 }
             )
         elif not editable:
-            raw.update({"visibility": "public", "mine": False})
+            raw.update({"visibility": "public", "mine": False, "can_manage": False})
         summaries.append(SkillSummary(**raw))
     return SkillListResponse(
         enabled=cfg["enabled"],
@@ -110,10 +112,10 @@ def save_skill(spec: SkillSpec, auth: AuthContext = Depends(require_auth)) -> Sk
     try:
         skill_dir = write_skill(cfg["upload_dir"], spec.model_dump())
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:  # pragma: no cover
         logger.exception("[skills] 写入失败")
-        raise HTTPException(status_code=500, detail=f"写入失败: {e}")
+        raise HTTPException(status_code=500, detail=f"写入失败: {e}") from e
 
     # 触发重载, 让本次保存即时生效
     try:
@@ -139,6 +141,7 @@ def save_skill(spec: SkillSpec, auth: AuthContext = Depends(require_auth)) -> Sk
         summary.visibility = meta.visibility
         summary.mine = True
         summary.editable = True
+        summary.can_manage = True
     return SkillSaveResponse(saved=True, id=saved.id, skill=summary)
 
 
@@ -150,10 +153,15 @@ def remove_skill(skill_id: str, _auth: AuthContext = Depends(require_auth)) -> S
     auth = _auth
     pipe = get_pipeline()
     cfg = _skills_cfg(pipe)
+    meta = repo.find_manageable_skill(skill_id, auth) if repo.available() else None
+    if repo.available() and meta is None:
+        raise HTTPException(status_code=404, detail="未找到可删除的用户 skill")
+    if meta is not None:
+        require_delete(auth, meta)
     try:
         deleted = delete_skill(cfg["upload_dir"], skill_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if not deleted:
         raise HTTPException(
             status_code=404,
@@ -163,8 +171,16 @@ def remove_skill(skill_id: str, _auth: AuthContext = Depends(require_auth)) -> S
         pipe._get_query_flow().reload_skills()
     except Exception as e:  # pragma: no cover
         logger.warning(f"[skills] reload_skills 失败: {e}")
-    if repo.available():
-        repo.delete_skill_metadata(skill_id, auth)
+    if repo.available() and meta is not None:
+        repo.delete_skill_metadata_as(meta.owner_id, skill_id)
+        if meta.owner_id != auth.user_id:
+            repo.append_audit_log(
+                auth=auth,
+                resource_type="skill",
+                resource_id=f"{meta.owner_id}:{skill_id}",
+                action="delete",
+                target_owner_id=meta.owner_id,
+            )
     return SkillDeleteResponse(deleted=True, id=skill_id)
 
 
@@ -176,9 +192,23 @@ def set_skill_visibility(
 ) -> dict:
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
-    updated = repo.update_skill_visibility(skill_id, req.visibility, auth)
+    require_visibility_allowed(auth, req.visibility)
+    meta = repo.find_manageable_skill(skill_id, auth)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="未找到可写的 skill")
+    require_manage(auth, meta)
+    updated = repo.update_skill_visibility_as(meta.owner_id, skill_id, req.visibility)
     if updated is None:
         raise HTTPException(status_code=404, detail="未找到可写的 skill")
+    if meta.owner_id != auth.user_id:
+        repo.append_audit_log(
+            auth=auth,
+            resource_type="skill",
+            resource_id=f"{meta.owner_id}:{skill_id}",
+            action="set_visibility",
+            target_owner_id=meta.owner_id,
+            metadata={"visibility": req.visibility},
+        )
     return {"updated": True, "id": skill_id, "visibility": updated.visibility}
 
 

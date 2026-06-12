@@ -3,8 +3,9 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NButton, NInput, NInputNumber } from 'naive-ui'
 import { useApi } from '@/composables/useApi'
+import { useAuthz } from '@/composables/useAuthz'
 import WorkspaceSplit from '@/components/WorkspaceSplit.vue'
-import type { SkillSpec, SkillSummary } from '@/api/types'
+import type { SkillSpec, SkillSummary, Visibility } from '@/api/types'
 
 interface SkillForm {
   id: string
@@ -20,6 +21,7 @@ interface SkillForm {
 
 const { t } = useI18n()
 const api = useApi()
+const authz = useAuthz()
 
 const enabled = ref(true)
 const skills = ref<SkillSummary[]>([])
@@ -41,6 +43,7 @@ const form = reactive<SkillForm>({
 })
 
 const selected = computed(() => skills.value.find((s) => s.id === selectedId.value) || null)
+const canManageSelected = computed(() => Boolean(selected.value?.can_manage ?? selected.value?.mine))
 const groupedSkills = computed(() => [
   {
     key: 'public',
@@ -142,7 +145,10 @@ async function remove(s: SkillSummary) {
 
 async function toggleVisibility(s: SkillSummary) {
   try {
-    const next = s.visibility === 'private' ? 'org' : s.visibility === 'org' ? 'public' : 'private'
+    const next: Visibility =
+      s.visibility === 'private'
+        ? authz.canUseOrgVisibility.value ? 'org' : 'public'
+        : s.visibility === 'org' ? 'public' : 'private'
     await api.setSkillVisibility(s.id, next)
     await load()
   } catch {
@@ -289,7 +295,7 @@ function visibilityLabel(v?: string): string {
             <p class="mt-0.5 text-sm text-muted">{{ selected.description || '—' }}</p>
           </div>
           <div class="flex items-center gap-2">
-            <template v-if="selected.editable && selected.mine !== false">
+            <template v-if="selected.editable && canManageSelected">
               <NButton tertiary size="small" @click="toggleVisibility(selected)">
                 {{ visibilityLabel(selected.visibility) }}
               </NButton>

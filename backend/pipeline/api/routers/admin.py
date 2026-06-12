@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+from ...db import repo
+from ..authz import require_read
+from ..deps import AuthContext, require_auth
 from ..models import (
     DocSummaryResponse,
     HealthResponse,
@@ -30,6 +32,48 @@ _summary_client = None
 _summary_collection = ""
 
 
+def _require_admin_console(auth: AuthContext) -> None:
+    if auth.role not in ("admin", "root"):
+        raise HTTPException(status_code=403, detail="Admin role required")
+
+
+def _message_payload(m) -> dict:
+    return {
+        "id": m.id,
+        "parentId": m.parent_id,
+        "role": m.role,
+        "content": m.content,
+        "hits": m.hits or [],
+        "context": m.context,
+        "research": m.research,
+        "latency": m.latency_s,
+        "usage": m.usage,
+        "status": m.status,
+        "error": m.error,
+        "createdAt": int(m.created_at.timestamp() * 1000) if m.created_at else 0,
+    }
+
+
+def _conversation_payload(conv, *, include_messages: bool = False) -> dict:
+    payload = {
+        "id": conv.id,
+        "title": conv.title,
+        "sessionId": conv.session_id,
+        "visibility": conv.visibility,
+        "activeLeafId": conv.active_leaf_message_id,
+        "updatedAt": int(conv.updated_at.timestamp() * 1000) if conv.updated_at else 0,
+        "ownerId": conv.owner_id,
+        "orgId": conv.org_id,
+        "mine": False,
+        "forkedFrom": conv.forked_from,
+    }
+    if include_messages:
+        messages = repo.list_messages(conv.id)
+        payload["messages"] = {m.id: _message_payload(m) for m in messages}
+        payload["rootIds"] = [m.id for m in messages if m.parent_id is None]
+    return payload
+
+
 def _get_summary_client():
     """复用一个 MilvusClient (按需创建), 返回 (client, collection)。"""
     global _summary_client, _summary_collection
@@ -46,8 +90,9 @@ def _get_summary_client():
 
 
 @router.get("/stats", response_model=StatsResponse)
-def stats() -> StatsResponse:
+def stats(auth: AuthContext = Depends(require_auth)) -> StatsResponse:
     """查看 Milvus 集合统计。"""
+    _require_admin_console(auth)
     from ..deps import get_pipeline
     pipe = get_pipeline()
     raw = pipe.stats()
@@ -62,11 +107,20 @@ def _esc(v: str) -> str:
 
 
 @router.get("/doc_summary", response_model=DocSummaryResponse)
-def doc_summary(doc_id: str) -> DocSummaryResponse:
+def doc_summary(doc_id: str, auth: AuthContext = Depends(require_auth)) -> DocSummaryResponse:
     """按 doc_id 返回该文献的简介 (summary 摘要块), 供前端角标点击展示。
 
     优先取 type=summary 块; 缺失时回退到 title / 首个 text 块。
     """
+    if repo.available():
+        doc = repo.find_document_by_doc_id(doc_id, auth)
+        if doc is None:
+            return DocSummaryResponse(doc_id=doc_id, found=False)
+        collection = repo.get_collection(doc.collection_name)
+        if collection is None:
+            return DocSummaryResponse(doc_id=doc_id, found=False)
+        require_read(auth, collection)
+
     fields = [
         "chunk_id", "doc_id", "doc_name", "type",
         "section", "page_start", "publication_year", "content",
@@ -207,13 +261,178 @@ def health() -> HealthResponse:
 
 
 # ---------------------------------------------------------------------------
+# 组织/平台管理资源 API
+# ---------------------------------------------------------------------------
+
+
+@router.get("/admin/me")
+def admin_me(auth: AuthContext = Depends(require_auth)) -> dict:
+    return {
+        "user_id": auth.user_id,
+        "org_id": auth.org_id,
+        "role": auth.role,
+        "organizations": auth.organizations,
+        "organization_roles": auth.organization_roles,
+        "is_admin": auth.role in ("admin", "root"),
+        "is_root": auth.is_root,
+    }
+
+
+@router.get("/admin/resources/collections")
+def admin_collections(auth: AuthContext = Depends(require_auth)) -> dict:
+    _require_admin_console(auth)
+    if not repo.available():
+        raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    collections = []
+    for meta in repo.list_admin_collections(auth):
+        docs = repo.list_documents_as(meta.name)
+        collections.append(
+            {
+                "name": meta.name,
+                "display_name": meta.display_name,
+                "owner_id": meta.owner_id,
+                "org_id": meta.org_id,
+                "visibility": meta.visibility,
+                "doc_count": len([d for d in docs if d.status == "ready"]),
+                "row_count": sum(d.chunk_count for d in docs),
+                "mine": meta.owner_id == auth.user_id,
+                "can_manage": True,
+            }
+        )
+    repo.append_audit_log(
+        auth=auth,
+        resource_type="kb_collection",
+        resource_id="*",
+        action="admin_list",
+        metadata={"count": len(collections)},
+    )
+    return {"collections": collections}
+
+
+@router.get("/admin/resources/collections/{name}/documents")
+def admin_collection_documents(name: str, auth: AuthContext = Depends(require_auth)) -> dict:
+    _require_admin_console(auth)
+    if not repo.available():
+        raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    meta = repo.get_collection(name)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    if not (auth.is_root or meta.owner_id == auth.user_id or (auth.role == "admin" and meta.org_id == auth.org_id)):
+        raise HTTPException(status_code=403, detail="No admin permission for collection")
+    docs = repo.list_documents_as(name)
+    repo.append_audit_log(
+        auth=auth,
+        resource_type="kb_collection",
+        resource_id=name,
+        action="admin_list_documents",
+        target_owner_id=meta.owner_id,
+        metadata={"count": len(docs)},
+    )
+    return {"documents": [d.model_dump(mode="json") for d in docs]}
+
+
+@router.get("/admin/resources/conversations")
+def admin_conversations(auth: AuthContext = Depends(require_auth)) -> dict:
+    _require_admin_console(auth)
+    if not repo.available():
+        raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    conversations = [_conversation_payload(c) for c in repo.list_admin_conversations(auth)]
+    repo.append_audit_log(
+        auth=auth,
+        resource_type="conversation",
+        resource_id="*",
+        action="admin_list",
+        metadata={"count": len(conversations)},
+    )
+    return {"conversations": conversations}
+
+
+@router.get("/admin/resources/conversations/{conversation_id}")
+def admin_conversation(conversation_id: str, auth: AuthContext = Depends(require_auth)) -> dict:
+    _require_admin_console(auth)
+    if not repo.available():
+        raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    conv = repo.get_conversation(conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    if not (auth.is_root or conv.owner_id == auth.user_id or (auth.role == "admin" and conv.org_id == auth.org_id)):
+        raise HTTPException(status_code=403, detail="No admin permission for conversation")
+    repo.append_audit_log(
+        auth=auth,
+        resource_type="conversation",
+        resource_id=conversation_id,
+        action="admin_read",
+        target_owner_id=conv.owner_id,
+    )
+    return {"conversation": _conversation_payload(conv, include_messages=True)}
+
+
+@router.get("/admin/resources/skills")
+def admin_skills(auth: AuthContext = Depends(require_auth)) -> dict:
+    _require_admin_console(auth)
+    if not repo.available():
+        raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    skills = [s.model_dump(mode="json") | {"can_manage": True} for s in repo.list_admin_skill_metadata(auth)]
+    repo.append_audit_log(
+        auth=auth,
+        resource_type="skill",
+        resource_id="*",
+        action="admin_list",
+        metadata={"count": len(skills)},
+    )
+    return {"skills": skills}
+
+
+@router.get("/admin/resources/ingest-tasks")
+def admin_ingest_tasks(auth: AuthContext = Depends(require_auth), limit: int = 200) -> dict:
+    _require_admin_console(auth)
+    if not repo.available():
+        raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    tasks = [t.model_dump(mode="json") for t in repo.list_admin_ingest_tasks(auth, limit=max(1, min(limit, 500)))]
+    repo.append_audit_log(
+        auth=auth,
+        resource_type="ingest_task",
+        resource_id="*",
+        action="admin_list",
+        metadata={"count": len(tasks)},
+    )
+    return {"tasks": tasks}
+
+
+@router.get("/admin/resources/generation-runs")
+def admin_generation_runs(auth: AuthContext = Depends(require_auth), limit: int = 200) -> dict:
+    _require_admin_console(auth)
+    if not repo.available():
+        raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    runs = [r.model_dump(mode="json") for r in repo.list_admin_generation_runs(auth, limit=max(1, min(limit, 500)))]
+    repo.append_audit_log(
+        auth=auth,
+        resource_type="generation_run",
+        resource_id="*",
+        action="admin_list",
+        metadata={"count": len(runs)},
+    )
+    return {"runs": runs}
+
+
+@router.get("/admin/audit-logs")
+def admin_audit_logs(auth: AuthContext = Depends(require_auth), limit: int = 200) -> dict:
+    _require_admin_console(auth)
+    if not repo.available():
+        raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
+    logs = repo.list_audit_logs(auth, limit=max(1, min(limit, 500)))
+    return {"logs": [log.model_dump(mode="json") for log in logs]}
+
+
+# ---------------------------------------------------------------------------
 # 日志查看 API
 # ---------------------------------------------------------------------------
 
 
 @router.get("/logs/sessions", response_model=LogSessionListResponse)
-def list_log_sessions() -> LogSessionListResponse:
+def list_log_sessions(auth: AuthContext = Depends(require_auth)) -> LogSessionListResponse:
     """返回有日志的 session 列表, 按最后更新时间倒序。"""
+    _require_admin_console(auth)
     handler = get_session_log_handler()
     sessions = handler.list_sessions()
     return LogSessionListResponse(
@@ -224,9 +443,11 @@ def list_log_sessions() -> LogSessionListResponse:
 @router.get("/logs/sessions/{session_id}", response_model=LogSessionDetail)
 def get_log_session(
     session_id: str,
-    tail: Optional[int] = Query(None, description="仅返回最后 N 行"),
+    tail: int | None = Query(None, description="仅返回最后 N 行"),
+    auth: AuthContext = Depends(require_auth),
 ) -> LogSessionDetail:
     """返回指定 session 的检索流程日志。"""
+    _require_admin_console(auth)
     handler = get_session_log_handler()
     detail = handler.get_session(session_id, tail=tail)
     if detail is None:
@@ -251,8 +472,12 @@ def get_log_session(
 
 
 @router.get("/logs/sessions/{session_id}/stream")
-async def stream_log_session(session_id: str) -> StreamingResponse:
+async def stream_log_session(
+    session_id: str,
+    auth: AuthContext = Depends(require_auth),
+) -> StreamingResponse:
     """SSE 实时推送指定 session 的新日志行。"""
+    _require_admin_console(auth)
 
     async def event_generator():
         import asyncio

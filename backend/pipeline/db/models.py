@@ -55,7 +55,7 @@ class Message(BaseModel):
 
 
 class KbCollection(BaseModel):
-    name: str  # Milvus 集合名 kb_xxx
+    name: str  # 业务 KB id/slug，不再代表 Milvus 物理 collection 名
     display_name: str = ""
     owner_id: str
     org_id: str | None = None
@@ -66,7 +66,7 @@ class KbCollection(BaseModel):
 
 class Document(BaseModel):
     id: str
-    collection_name: str
+    collection_name: str  # 业务 KB id/slug
     owner_id: str
     doc_id: str  # pipeline doc_id（原文件名 stem）
     title: str | None = None
@@ -135,7 +135,7 @@ class IngestTask(BaseModel):
     id: str
     owner_id: str
     org_id: str | None = None
-    collection_name: str
+    collection_name: str  # 业务 KB id/slug
     kind: str = "upload"
     status: IngestTaskStatus = "queued"
     progress: float = 0.0
@@ -157,7 +157,7 @@ class IngestTask(BaseModel):
 class IngestTaskItem(BaseModel):
     id: str
     task_id: str
-    collection_name: str
+    collection_name: str  # 业务 KB id/slug
     owner_id: str
     doc_id: str
     filename: str | None = None
@@ -180,4 +180,17 @@ class IngestTaskEvent(BaseModel):
     seq: int
     type: str
     payload: dict[str, Any]
+    created_at: datetime | None = None
+
+
+class AuditLog(BaseModel):
+    id: int | None = None
+    actor_id: str
+    actor_role: str
+    actor_org_id: str | None = None
+    target_owner_id: str | None = None
+    resource_type: str
+    resource_id: str
+    action: str
+    metadata: dict[str, Any] | None = None
     created_at: datetime | None = None

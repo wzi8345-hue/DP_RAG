@@ -218,9 +218,9 @@ class IngestWorker:
                     )
 
         try:
-            self.pipeline.flush_collection(task.collection_name)
+            self.pipeline.flush_collection(self.pipeline.config.milvus.get("collection", "literature_chunks"))
         except Exception as e:
-            logger.warning("[ingest-worker] flush failed %s: %s", task.collection_name, e)
+            logger.warning("[ingest-worker] flush failed: %s", e)
 
         final = repo.update_ingest_task_counts(task_id)
         result = {

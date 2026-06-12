@@ -4,7 +4,7 @@
 >
 > 状态图例：`☐ 待办` · `◐ 进行中` · `☑ 完成` · `⊘ 取消/暂缓`
 >
-> 最近更新：2026-06-09
+> 最近更新：2026-06-12
 
 ---
 
@@ -62,6 +62,7 @@
 - ☑ #3.3 替换各 router 的 `verify_api_key` → `require_auth`；运维接口保持免认证
 - ☑ #3.4 `AUTH_DISABLED` 本地开发开关
 - ☑ #3.5 CORS 调整（rag.hal9k.one / localhost:9527）+ root_path（反代前缀）
+- ☑ #3.6 Logto `organization_roles` 解析为 `user/admin/root`，支持无组织用户、组织管理员和平台 root
 
 > 待验证：需在装好依赖（PyJWT 等）的环境运行，用真实 Logto token 端到端验证。
 
@@ -79,7 +80,8 @@
 - ☑ #5.4 可见性切换接口（collections / skills / conversations）
 - ☑ #5.5 对话分享链接（创建/撤销/公开只读解析）+ copy-on-continue 独立副本
 - ☑ #5.6 文献库 / skill copy-to-mine：复制为 owner=me 的独立私有资源
-- ☑ #5.7 chat/query 检索范围校验：collection 必须可读；professional 自定义 skill 按当前用户可读 allowlist 过滤
+- ☑ #5.7 chat/query 默认 all_accessible：Postgres 计算 readable `kb_ids`，Milvus 在统一物理 collection 中用 `kb_id in [...]` filter 检索
+- ☑ #5.8 admin/root 管理权限：普通接口与管理接口分离，管理操作写 `audit_logs`，Logto 组织变更不迁移历史资源
 
 ### M6 · 生成解耦
 - ☑ #6.1 生成移入独立 `backend-worker` 服务，Web 只创建 run 并入 Redis 队列
@@ -87,6 +89,7 @@
 - ☑ #6.3 `POST /runs/{run_id}/stop` 取消标志，worker 协作式停止
 - ☑ #6.4 前端断连不取消后台；重连通过 `run_id + seq` 回放恢复
 - ☑ #6.5 解析/入库任务迁到 Redis ingest queue + 独立 `ingest-worker`，支持任务状态、事件回放与取消
+- ☑ #6.6 Milvus 单物理 collection + `kb_id` metadata filter，parser bbox 贯通到 hit 与 PDF 原文定位
 
 ### M7 · 多检索源
 - ◐ #7.1 `RetrievalSource` 协议 + `LiteratureSource`（`pipeline/retrieval_sources/` 已落地，待接入 QueryFlow）
@@ -149,13 +152,15 @@
 - 2026-06-09 · 引用跳转 + 对象存储 + 三级权限：新增 RustFS/S3 client（`boto3`）与 compose 服务/env；上传入库将 PDF 与解析产物写入对象存储并落 `documents.pdf_object_key/artifact_prefix`；新增 `POST /documents/pdf-url` 预签名 URL。前端引入 `@embedpdf/vue-pdf-viewer`，SourcesPanel 增「原文」tab，点击引用角标按 `hit.page_start` 跳页。完成 `Visibility=private|org|public`、`api/authz.py`、`db/repo.py`、collections/skills/conversations/chat/query 权限接线；新增分享链接、copy-on-continue、文献库/skill copy-to-mine 与前端 public→org→mine 分组。验证：frontend typecheck 通过；后端变更文件 `py_compile` 通过（全量 ruff 仍有历史 typing/ruff 债务，见 #9.7）。
 - 2026-06-10 · M6 生产级对话运行架构：新增 `generation_runs/message_events`（Postgres 权威存储 + 按 run_id/seq 回放），新增 Redis 依赖与 `pipeline/clients/redis.py`（run queue + Redis Streams），新增 `/chat/append`、`/runs/{run_id}/stream`、`/runs/{run_id}/status`、`/runs/{run_id}/stop`；新增独立 `pipeline.workers.generation` worker，从 Redis 消费 run、按 Postgres message parent chain 重建上下文、调用现有 `stream_chat_events`、双写 Postgres events 与 Redis Stream。前端 `useChat` 改为 append → subscribe run stream；compose 增 Redis 与独立 `worker` 服务。旧 `/chat` 与 `/chat/stream` 已降级为 410，避免继续走请求内生成链路。
 - 2026-06-11 · M6 解析入库队列化：新增 `ingest_tasks/ingest_task_items/ingest_task_events`（Postgres 权威任务状态 + 按 task_id/seq 回放），扩展 Redis runtime 增加独立 ingest queue/stream；`POST /ingest/upload` 改为 submit-only，新增 `/ingest/tasks/{id}`、`/ingest/tasks/{id}/stream`、`/ingest/tasks/{id}/cancel`；新增 `pipeline.workers.ingest` 独立 worker，逐文件执行 parse→chunk→embed→Milvus store、上传 artifacts、回填 documents 与 task item。前端 Library 上传状态改为后端 canonical task，支持取消与刷新恢复；compose 增 `ingest-worker` 服务。
+- 2026-06-12 · RAG 存储模型收敛：Milvus 从“每业务知识库一个 collection”改为“单物理 `literature_chunks` + `kb_id` metadata filter”；Postgres 继续作为 KB 归属/权限权威。默认问答不再要求用户选库，后端按 AuthContext 计算 readable `kb_ids` 并下推给 Milvus filter。Milvus schema 增加 `kb_id/bbox/bboxes/page_width/page_height`，MinerU/UniParser chunker 写入 bbox，前端 PDF 原文 tab 支持 bbox 高亮提示。该改动不保留旧 Milvus schema 兼容，需要重建并重新入库。
+- 2026-06-12 · Org Role Permissions：后端从 Logto `organization_roles` 解析 `sci-loop-user/admin/root`，新增普通权限与 admin/root 管理权限分层；无组织用户不能设置 org 可见，Logto 组织变化不迁移历史资源。新增 `audit_logs`、`/admin/resources/*`、前端 `useAuthz` 与 Admin 页面，Library/Skills 根据 `can_manage` 与组织状态展示管理动作。
 - 下一步：M9.6 现有端点统一迁移到 POST+APIResponse（含前端 client 与协议文档）→ M7 多源融合。
 
 ---
 
 ## 3. 待澄清 / 风险
 
-- 组织（org）信息如何随 Logto token 下发：需确认 access_token 是否含 `organizations` / `organization_id` claim；否则 org-public 需通过 Logto Management API 或固定单组织实现。【M5 风险】
+- Logto token 已可下发 `organizations` / `organization_roles`；若后续切到 organization access token，需要保持前后端 `LOGTO_ROLE_*` 与 `VITE_LOGTO_ROLE_*` 配置一致。【M5】
 - `funmg.dp.tech/sci-loop-api` 反代是否会重写路径前缀（影响前端 `VITE_API_BASE` 与后端 root_path）。【M8】
 - Milvus 多用户隔离：当前按集合命名 + owner 校验；如需更强隔离可评估 partition/db。【M5】
 - 文献库 copy-to-mine 当前会复制 DB metadata、本地解析产物并提交重建任务；对象存储中的 PDF key 会复用源 key。若后续实现源对象硬删除，需要补对象存储前缀级复制或引用计数。【M5】

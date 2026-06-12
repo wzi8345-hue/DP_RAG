@@ -50,16 +50,17 @@ VALID_CHUNK_TYPES = ("summary", "text", "title", "table", "image", "equation", "
 
 # Milvus 返回字段
 _OUTPUT_FIELDS = [
-    "pk", "chunk_id", "doc_id", "doc_name",
+    "pk", "kb_id", "chunk_id", "doc_id", "doc_name",
     "type", "section", "page_start", "paragraph_index",
     "publication_year",
     "content", "context", "related_assets",
+    "bbox", "bboxes", "page_width", "page_height",
 ]
 
 _REQUIRED_COLLECTION_FIELDS = {
-    "pk", "chunk_id", "doc_id", "doc_name", "type",
+    "pk", "kb_id", "chunk_id", "doc_id", "doc_name", "type",
     "section", "page_start", "paragraph_index", "publication_year",
-    "content", "context", "related_assets",
+    "content", "context", "related_assets", "bbox", "bboxes",
     "embedding", "sparse_embedding",  # v3 schema: BM25 稀疏向量
 }
 
@@ -91,6 +92,7 @@ _STOPWORDS = {
 class Hit:
     """统一的检索命中数据结构 (v4 schema, 增加 paragraph_index)。"""
     pk: str = ""
+    kb_id: str = ""
     chunk_id: str = ""
     doc_id: str = ""
     doc_name: str = ""
@@ -102,6 +104,10 @@ class Hit:
     content: str = ""
     context: str = ""
     related_assets: List[Dict[str, Any]] = field(default_factory=list)
+    bbox: Dict[str, Any] = field(default_factory=dict)
+    bboxes: List[Dict[str, Any]] = field(default_factory=list)
+    page_width: int = 0
+    page_height: int = 0
     score: float = 0.0
     rrf_score: float = 0.0
     sources: List[str] = field(default_factory=list)
@@ -272,6 +278,12 @@ def _row_to_hit(row: Dict[str, Any], score: float = 0.0) -> Hit:
     related = row.get("related_assets") or []
     if not isinstance(related, list):
         related = []
+    bboxes = row.get("bboxes") or []
+    if not isinstance(bboxes, list):
+        bboxes = []
+    bbox = row.get("bbox") or {}
+    if not isinstance(bbox, dict):
+        bbox = {}
     raw_para = row.get("paragraph_index")
     try:
         paragraph_index = int(raw_para) if raw_para is not None else -1
@@ -279,6 +291,7 @@ def _row_to_hit(row: Dict[str, Any], score: float = 0.0) -> Hit:
         paragraph_index = -1
     return Hit(
         pk=row.get("pk", ""),
+        kb_id=row.get("kb_id", ""),
         chunk_id=row.get("chunk_id", ""),
         doc_id=row.get("doc_id", ""),
         doc_name=row.get("doc_name", ""),
@@ -290,6 +303,10 @@ def _row_to_hit(row: Dict[str, Any], score: float = 0.0) -> Hit:
         content=row.get("content", "") or "",
         context=row.get("context", "") or "",
         related_assets=related,
+        bbox=bbox,
+        bboxes=[b for b in bboxes if isinstance(b, dict)],
+        page_width=int(row.get("page_width") or 0),
+        page_height=int(row.get("page_height") or 0),
         score=score,
     )
 
@@ -304,8 +321,16 @@ def _escape_eq(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _build_filter_expr(doc_id: Optional[str], chunk_type: Optional[str]) -> Optional[str]:
+def _build_filter_expr(
+    doc_id: Optional[str],
+    chunk_type: Optional[str],
+    kb_ids: Optional[List[str]] = None,
+) -> Optional[str]:
     parts = []
+    ids = [x for x in (kb_ids or []) if x]
+    if ids:
+        escaped = ", ".join(f'"{_escape_eq(x)}"' for x in ids)
+        parts.append(f"kb_id in [{escaped}]")
     if doc_id:
         parts.append(f'doc_id == "{_escape_eq(doc_id)}"')
     if chunk_type:

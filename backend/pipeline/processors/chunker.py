@@ -21,7 +21,6 @@ v3 chunking (本次修改) 与 v2 的关键差异:
 from __future__ import annotations
 
 import glob
-import json
 import logging
 import math
 import os
@@ -249,6 +248,58 @@ def _normalize_text(s: str) -> str:
     s = _collapse_cjk_summary_labels(s)
     s = s.strip()
     return s
+
+
+def _item_bbox(item: Dict[str, Any], page: int | None = None) -> Dict[str, Any]:
+    raw = item.get("bbox") or item.get("box")
+    if isinstance(raw, dict):
+        x0 = raw.get("x0", raw.get("left", raw.get("x")))
+        y0 = raw.get("y0", raw.get("top", raw.get("y")))
+        x1 = raw.get("x1", raw.get("right"))
+        y1 = raw.get("y1", raw.get("bottom"))
+        width = raw.get("width", raw.get("w"))
+        height = raw.get("height", raw.get("h"))
+        if x1 is None and x0 is not None and width is not None:
+            x1 = float(x0) + float(width)
+        if y1 is None and y0 is not None and height is not None:
+            y1 = float(y0) + float(height)
+    elif isinstance(raw, (list, tuple)) and len(raw) >= 4:
+        x0, y0, x1, y1 = raw[:4]
+    else:
+        return {}
+    try:
+        return {
+            "page": int(item.get("_page", page if page is not None else 0) or 0),
+            "x0": float(x0),
+            "y0": float(y0),
+            "x1": float(x1),
+            "y1": float(y1),
+        }
+    except (TypeError, ValueError):
+        return {}
+
+
+def _union_bboxes(boxes: List[Dict[str, Any]]) -> Dict[str, Any]:
+    boxes = [b for b in boxes if b and isinstance(b, dict)]
+    if not boxes:
+        return {}
+    page = int(boxes[0].get("page", 0) or 0)
+    same_page = [b for b in boxes if int(b.get("page", -1)) == page] or boxes[:1]
+    return {
+        "page": page,
+        "x0": min(float(b["x0"]) for b in same_page),
+        "y0": min(float(b["y0"]) for b in same_page),
+        "x1": max(float(b["x1"]) for b in same_page),
+        "y1": max(float(b["y1"]) for b in same_page),
+    }
+
+
+def _attach_bboxes(chunk: Dict[str, Any], boxes: List[Dict[str, Any]]) -> Dict[str, Any]:
+    clean = [b for b in boxes if b]
+    if clean:
+        chunk["bbox"] = _union_bboxes(clean)
+        chunk["bboxes"] = clean
+    return chunk
 
 
 def _compile_patterns(raw: Optional[List[str]]) -> List[re.Pattern[str]]:
@@ -790,7 +841,7 @@ def _detect_summary_sections(
         return result
     if len(vectors) != len(summary_query_texts) + len(normalized_titles):
         logger.warning(
-            f"[summary-detect][tier3-embedding] embedding 返回数量不匹配, 跳过"
+            "[summary-detect][tier3-embedding] embedding 返回数量不匹配, 跳过"
         )
         return result
     query_vecs = vectors[: len(summary_query_texts)]
@@ -1243,7 +1294,7 @@ def _build_chunk_from_group(
         chunk_type = "equation"
     else:
         chunk_type = "text"
-    return {
+    chunk = {
         "id": _short_id(chunk_type),
         "type": chunk_type,
         "section": section,
@@ -1256,6 +1307,7 @@ def _build_chunk_from_group(
         # 用户问 "第 12 段" 仍只命中真正的 text/summary.
         "paragraph_index": -1 if chunk_type == "equation" else paragraph_index,
     }
+    return _attach_bboxes(chunk, [_item_bbox(item) for item in group])
 
 
 # 兼容外部可能的调用 (现保留, 内部不再使用; section 模式仍可一键合成全章 chunk)
@@ -1670,7 +1722,7 @@ def _build_asset_chunk(
             abs_path = _resolve_path(images_root, img_path)
             if abs_path:
                 chunk["image_path"] = abs_path
-        return chunk
+        return _attach_bboxes(chunk, [_item_bbox(item, page_idx)])
     if t == "table":
         caption = _flatten_inline(cd.get("table_caption", []))
         footnote = _flatten_inline(cd.get("table_footnote", []))
@@ -1696,7 +1748,7 @@ def _build_asset_chunk(
             abs_path = _resolve_path(images_root, img_path)
             if abs_path:
                 chunk["table_image_path"] = abs_path
-        return chunk
+        return _attach_bboxes(chunk, [_item_bbox(item, page_idx)])
     return None
 
 
@@ -1958,6 +2010,9 @@ def build_knowledge_blocks(
             for sc in split_chunks:
                 if "paragraph_index" not in sc:
                     sc["paragraph_index"] = para_idx
+                if "bbox" not in sc and base.get("bbox"):
+                    sc["bbox"] = base["bbox"]
+                    sc["bboxes"] = base.get("bboxes", [])
                 if is_preamble and sc.get("type") == "text":
                     sc["is_preamble"] = True
             out.extend(split_chunks)

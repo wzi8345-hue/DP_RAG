@@ -7,6 +7,7 @@ export default {
     chat: 'Chat',
     library: 'Library',
     skills: 'Skills',
+    admin: 'Admin',
     settings: 'Settings',
     newChat: 'New chat',
     noConversations: 'No conversations yet',
@@ -45,6 +46,14 @@ export default {
     callbackError: 'Sign-in callback failed',
     required: 'Please sign in to continue',
     account: 'Account',
+  },
+  admin: {
+    title: 'Admin',
+    forbidden: 'This account does not have admin permissions',
+    noOrg: 'No organization',
+    ingestTasks: 'Ingest tasks',
+    generationRuns: 'Generation runs',
+    auditLogs: 'Audit logs',
   },
   chat: {
     title: 'Chat',

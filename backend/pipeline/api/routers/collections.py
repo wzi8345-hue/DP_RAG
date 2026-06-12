@@ -24,11 +24,18 @@ import re
 import shutil
 import time
 import uuid
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..authz import require_read, require_write
+from ...db import repo
+from ..authz import (
+    can_manage,
+    require_delete,
+    require_manage,
+    require_read,
+    require_visibility_allowed,
+)
 from ..deps import AuthContext, get_pipeline, get_task_store, require_auth
 from ..models import (
     CollectionInfo,
@@ -40,7 +47,6 @@ from ..models import (
     TaskResponse,
     VisibilityRequest,
 )
-from ...db import repo
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +185,7 @@ def _is_kb_collection(name: str, *, default_collection: str = _DEFAULT_COLLECTIO
     return name == default_collection or name.startswith(_KB_PREFIX)
 
 
-def _list_disk_kbs(prefix: str) -> List[str]:
+def _list_disk_kbs(prefix: str) -> list[str]:
     """列出本地工作目录下的知识库目录 (仅 kb_*; 排除 uploads/skills 等)。"""
     if not os.path.isdir(UPLOAD_ROOT):
         return []
@@ -198,64 +204,23 @@ def list_collections(
     prefix: str = _KB_PREFIX,
     auth: AuthContext = Depends(require_auth),
 ) -> CollectionsListResponse:
-    """列出知识库集合: 默认库 literature_chunks + kb_* 集合 ∪ 本地 kb_* 工作目录。"""
-    pipe = get_pipeline()
-    default_coll = getattr(pipe, "_default_collection", None) or _DEFAULT_COLLECTION
-    by_name: Dict[str, Dict[str, Any]] = {}
-
-    # 1) Milvus: 只保留默认库与 kb_* (排除 skills 等无关集合)
-    for c in pipe.list_collections(prefix=""):
-        name = c["name"]
-        if not _is_kb_collection(name, default_collection=default_coll):
-            continue
-        if prefix and name != default_coll and not name.startswith(prefix):
-            continue
-        by_name[name] = {"name": name, "row_count": c.get("row_count", 0)}
-
-    # 2) 默认库必须始终可见 (即使用户只筛 kb_ 前缀)
-    by_name.setdefault(default_coll, {"name": default_coll, "row_count": 0})
-
-    # 3) 本地 kb_* 工作目录 (含尚未灌入的空知识库; uploads/skills 等不进列表)
-    for name in _list_disk_kbs(prefix):
-        by_name.setdefault(name, {"name": name, "row_count": 0})
-
-    db_meta: Dict[str, Any] = {}
-    if repo.available():
-        # 先为本地 legacy kb 补齐 metadata（归当前登录用户），然后按可读列表覆盖元信息。
-        for name in list(by_name):
-            if name != default_coll and name.startswith(_KB_PREFIX) and repo.get_collection(name) is None:
-                kb_dir = kb_workspace_dir(name)
-                fallback = name[len(_KB_PREFIX):]
-                repo.upsert_collection(
-                    name=name,
-                    display_name=_read_display_name(kb_dir, fallback),
-                    auth=auth,
-                )
-        db_meta = {c.name: c for c in repo.list_collections(auth)}
-        for c in db_meta.values():
-            by_name.setdefault(c.name, {"name": c.name, "row_count": 0})
-
-    # 4) 补充每个库的本地文档数 + 显示名
+    """列出当前用户可读的业务知识库。Milvus 物理 collection 不参与业务列表。"""
+    if not repo.available():
+        return CollectionsListResponse(collections=[])
     collections = []
-    for name, info in sorted(by_name.items()):
-        if repo.available() and name != default_coll and name not in db_meta:
-            continue
-        kb_dir = kb_workspace_dir(name)
-        info["doc_count"] = _disk_doc_count(kb_dir)
-        if name == default_coll:
-            info["display_name"] = "默认知识库"
-            info["visibility"] = "public"
-            info["mine"] = False
-        else:
-            fallback = name[len(_KB_PREFIX):] if name.startswith(_KB_PREFIX) else name
-            info["display_name"] = _read_display_name(kb_dir, fallback)
-            meta = db_meta.get(name)
-            if meta:
-                info["display_name"] = meta.display_name or info["display_name"]
-                info["owner_id"] = meta.owner_id
-                info["org_id"] = meta.org_id
-                info["visibility"] = meta.visibility
-                info["mine"] = meta.owner_id == auth.user_id
+    for meta in repo.list_collections(auth):
+        docs = repo.list_documents(meta.name, auth)
+        info: dict[str, Any] = {
+            "name": meta.name,
+            "display_name": meta.display_name or (meta.name[len(_KB_PREFIX):] if meta.name.startswith(_KB_PREFIX) else meta.name),
+            "row_count": sum(d.chunk_count for d in docs),
+            "doc_count": len([d for d in docs if d.status == "ready"]),
+            "owner_id": meta.owner_id,
+            "org_id": meta.org_id,
+            "visibility": meta.visibility,
+            "mine": meta.owner_id == auth.user_id,
+            "can_manage": can_manage(auth, meta),
+        }
         collections.append(CollectionInfo(**info))
 
     return CollectionsListResponse(collections=collections)
@@ -272,6 +237,7 @@ def create_collection(
     支持中文名: 集合名用 ASCII slug, 中文显示名存入工作目录元数据。
     """
     display_name = (req.name or "").strip()
+    require_visibility_allowed(auth, req.visibility)
     name = make_collection_slug(req.name)
     kb_dir = kb_workspace_dir(name)
     os.makedirs(kb_dir, exist_ok=True)
@@ -294,6 +260,7 @@ def create_collection(
         org_id=meta.org_id if meta else auth.org_id,
         visibility=meta.visibility if meta else req.visibility,
         mine=True,
+        can_manage=True,
     )
 
 
@@ -312,11 +279,9 @@ def delete_collection(
     if repo.available():
         meta = repo.get_collection(name)
         if meta:
-            require_write(auth, meta)
+            require_delete(auth, meta)
     pipe = get_pipeline()
-    # Milvus 删除是关键操作; drop_collection 会校验删除是否真实生效,
-    # 若残留会抛错。不要让后续本地目录清理结果覆盖 Milvus 删除结论。
-    collection_existed = pipe.drop_collection(name)
+    milvus_deleted = pipe.purge_kb_rows(name)
 
     # 连带清理本地工作目录 (中间产物 + 原始 PDF)
     kb_dir = kb_workspace_dir(name)
@@ -328,12 +293,20 @@ def delete_collection(
         except Exception as e:
             logger.warning(f"[collections] 清理本地目录失败 {kb_dir}: {e}")
     if repo.available():
-        repo.delete_collection_metadata(name, auth)
+        repo.delete_collection_metadata_as(name)
+        if meta and meta.owner_id != auth.user_id:
+            repo.append_audit_log(
+                auth=auth,
+                resource_type="kb_collection",
+                resource_id=name,
+                action="delete",
+                target_owner_id=meta.owner_id,
+            )
 
-    return DeleteCollectionResponse(deleted=collection_existed or local_existed, name=name)
+    return DeleteCollectionResponse(deleted=milvus_deleted or local_existed, name=name)
 
 
-def _rebuild_collection(task_id: str, collection: str, directory: str) -> Dict[str, Any]:
+def _rebuild_collection(task_id: str, collection: str, directory: str) -> dict[str, Any]:
     """后台任务: 复用本地已落盘的向量 (knowledge_blocks_vec.json), 清空集合后
     逐字节重灌, 不重新 chunk / embed (向量不漂移, 不依赖 embedding 服务在线)。
     缺 vec.json 的文档自动回退到完整 chunk→embed→store。"""
@@ -367,7 +340,7 @@ def _rebuild_collection(task_id: str, collection: str, directory: str) -> Dict[s
 @router.post("/collections/{name}/rebuild", response_model=TaskResponse)
 def rebuild_collection(
     name: str,
-    _auth: str = Depends(require_auth),
+    auth: AuthContext = Depends(require_auth),
 ) -> TaskResponse:
     """重建知识库 (异步): 复用本地已落盘的向量, 清空集合后逐字节重灌。
 
@@ -376,6 +349,11 @@ def rebuild_collection(
     """
     if not name.startswith(_KB_PREFIX):
         raise HTTPException(status_code=400, detail=f"仅允许重建 {_KB_PREFIX} 前缀的集合")
+    if repo.available():
+        meta = repo.get_collection(name)
+        if meta is None:
+            raise HTTPException(status_code=404, detail="知识库不存在")
+        require_manage(auth, meta)
     kb_dir = kb_workspace_dir(name)
     if not os.path.isdir(kb_dir) or _disk_doc_count(kb_dir) == 0:
         raise HTTPException(
@@ -396,9 +374,23 @@ def set_collection_visibility(
 ) -> dict:
     if not repo.available():
         raise HTTPException(status_code=503, detail="DATABASE_URL 未配置")
-    updated = repo.update_collection_visibility(name, req.visibility, auth)
+    require_visibility_allowed(auth, req.visibility)
+    meta = repo.get_collection(name)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    require_manage(auth, meta)
+    updated = repo.update_collection_visibility_as(name, req.visibility)
     if updated is None:
         raise HTTPException(status_code=404, detail="未找到可写的知识库")
+    if meta.owner_id != auth.user_id:
+        repo.append_audit_log(
+            auth=auth,
+            resource_type="kb_collection",
+            resource_id=name,
+            action="set_visibility",
+            target_owner_id=meta.owner_id,
+            metadata={"visibility": req.visibility},
+        )
     return {"updated": True, "name": name, "visibility": updated.visibility}
 
 
@@ -428,11 +420,19 @@ def delete_collection_document(
     meta = repo.get_collection(name)
     if meta is None:
         raise HTTPException(status_code=404, detail="知识库不存在")
-    require_write(auth, meta)
-    deleted = repo.delete_document(name, doc_id, auth)
+    require_delete(auth, meta)
+    deleted = repo.delete_document_as(name, doc_id)
     doc_dir = os.path.join(kb_workspace_dir(name), sanitized_doc_stem(doc_id))
     if os.path.isdir(doc_dir):
         shutil.rmtree(doc_dir, ignore_errors=True)
+    if meta.owner_id != auth.user_id:
+        repo.append_audit_log(
+            auth=auth,
+            resource_type="document",
+            resource_id=f"{name}:{doc_id}",
+            action="delete",
+            target_owner_id=meta.owner_id,
+        )
     return {"deleted": deleted}
 
 

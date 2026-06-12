@@ -266,6 +266,7 @@ class QueryFlow:
         output_file: Optional[str] = None,
         session: Optional[ChatSession] = None,
         professional: bool = False,
+        kb_ids: Optional[List[str]] = None,
     ) -> Tuple[QueryResult, ChatSession]:
         """执行查询流程: 检索 → 生成。
 
@@ -317,6 +318,7 @@ class QueryFlow:
             result = self._run_simple(
                 query, mode=mode, top_k=top_k, stream=stream,
                 output_file=output_file, history=history, session=session,
+                kb_ids=kb_ids,
             )
 
         session.add_turn(query=query, answer=result.answer, meta=result.session_meta)
@@ -1261,6 +1263,7 @@ class QueryFlow:
         query: str,
         mode: Optional[str] = None,
         top_k: Optional[int] = None,
+        kb_ids: Optional[List[str]] = None,
         stream: bool = False,
         output_file: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
@@ -1285,7 +1288,7 @@ class QueryFlow:
             "metadata": meta, "vector": vec, "bm25": bm25, "hybrid": hybrid,
         }
         retriever = retriever_map.get(mode, hybrid)
-        filter_expr = _build_filter_expr(doc_id, chunk_type)
+        filter_expr = _build_filter_expr(doc_id, chunk_type, kb_ids=kb_ids)
 
         retrieve_kwargs: Dict[str, Any] = {
             "top_k": top_k,
@@ -1588,6 +1591,7 @@ class QueryFlow:
         use_agentic: bool = True,
         mode: Optional[str] = None,
         top_k: Optional[int] = None,
+        kb_ids: Optional[List[str]] = None,
         professional: bool = False,
         collection: Optional[str] = None,
     ):
@@ -1683,7 +1687,7 @@ class QueryFlow:
                 return
             else:
                 # simple 模式: 不走 agent, 直接检索 + 生成
-                run_result = self._simple_retrieve(query, mode=mode, top_k=top_k)
+                run_result = self._simple_retrieve(query, mode=mode, top_k=top_k, kb_ids=kb_ids)
                 context = run_result["context"]
                 hits_data = run_result["hits"]
         except Exception as e:
@@ -1816,7 +1820,11 @@ class QueryFlow:
         }
 
     def _simple_retrieve(
-        self, query: str, mode: Optional[str] = None, top_k: Optional[int] = None,
+        self,
+        query: str,
+        mode: Optional[str] = None,
+        top_k: Optional[int] = None,
+        kb_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Simple 模式的检索阶段 (不含 LLM 生成), 供 stream_chat_events 复用。"""
         ret_cfg = self.config.retrieval
@@ -1831,7 +1839,7 @@ class QueryFlow:
             "metadata": meta, "vector": vec, "bm25": bm25, "hybrid": hybrid,
         }
         retriever = retriever_map.get(mode, hybrid)
-        filter_expr = _build_filter_expr(doc_id, chunk_type)
+        filter_expr = _build_filter_expr(doc_id, chunk_type, kb_ids=kb_ids)
 
         retrieve_kwargs: Dict[str, Any] = {
             "top_k": top_k,

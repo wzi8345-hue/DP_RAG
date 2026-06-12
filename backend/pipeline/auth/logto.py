@@ -16,11 +16,14 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Header, HTTPException
 
 logger = logging.getLogger(__name__)
+
+AuthRole = Literal["user", "admin", "root"]
+_ROLE_PRIORITY: dict[AuthRole, int] = {"user": 0, "admin": 1, "root": 2}
 
 
 @dataclass
@@ -30,6 +33,9 @@ class AuthContext:
     user_id: str                      # Logto sub
     org_id: str | None = None      # 组织 id (org-public 共享用); 可能为 None
     scopes: list[str] = field(default_factory=list)
+    organizations: list[str] = field(default_factory=list)
+    organization_roles: list[str] = field(default_factory=list)
+    role: AuthRole = "user"
     client_id: str = ""
     claims: dict[str, Any] = field(default_factory=dict)
     token: str = ""
@@ -38,14 +44,84 @@ class AuthContext:
     def is_dev(self) -> bool:
         return self.user_id == "dev"
 
+    @property
+    def is_root(self) -> bool:
+        return self.role == "root"
+
+    @property
+    def is_org_admin(self) -> bool:
+        return self.role in ("admin", "root")
+
 
 _DEV_CONTEXT = AuthContext(
-    user_id="dev", org_id="dev-org", scopes=["all:data"], client_id="dev",
+    user_id="dev",
+    org_id="dev-org",
+    scopes=["all:data"],
+    organizations=["dev-org"],
+    organization_roles=["dev-org:sci-loop-root"],
+    role="root",
+    client_id="dev",
 )
 
 
 def auth_disabled() -> bool:
     return os.environ.get("AUTH_DISABLED", "0").strip().lower() in ("1", "true", "yes")
+
+
+def _as_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [x for x in value.replace(",", " ").split() if x]
+    if isinstance(value, (list, tuple, set)):
+        return [str(x) for x in value if x is not None and str(x)]
+    return [str(value)]
+
+
+def _role_names() -> dict[AuthRole, str]:
+    return {
+        "user": os.environ.get("LOGTO_ROLE_USER", "sci-loop-user"),
+        "admin": os.environ.get("LOGTO_ROLE_ADMIN", "sci-loop-admin"),
+        "root": os.environ.get("LOGTO_ROLE_ROOT", "sci-loop-root"),
+    }
+
+
+def _role_from_name(name: str) -> AuthRole | None:
+    role_names = _role_names()
+    normalized = name.strip()
+    for role in ("root", "admin", "user"):
+        if normalized == role_names[role] or normalized == role:
+            return role
+    return None
+
+
+def _split_org_role(raw: str) -> tuple[str | None, str]:
+    org_id, sep, role_name = raw.partition(":")
+    if sep:
+        return org_id or None, role_name
+    return None, org_id
+
+
+def _auth_role_from_claims(claims: dict[str, Any]) -> tuple[AuthRole, str | None, list[str], list[str]]:
+    organizations = _as_string_list(claims.get("organizations"))
+    organization_roles = _as_string_list(claims.get("organization_roles"))
+    explicit_org = claims.get("organization_id") or claims.get("org_id")
+
+    role: AuthRole = "user"
+    role_org: str | None = str(explicit_org) if explicit_org else None
+    for raw in organization_roles + _as_string_list(claims.get("roles")) + _as_string_list(claims.get("role")):
+        org_id, role_name = _split_org_role(raw)
+        parsed = _role_from_name(role_name)
+        if parsed is None:
+            continue
+        if _ROLE_PRIORITY[parsed] > _ROLE_PRIORITY[role]:
+            role = parsed
+            role_org = org_id or role_org
+
+    org_id = role_org
+    if not org_id and len(organizations) == 1:
+        org_id = organizations[0]
+    return role, org_id, organizations, organization_roles
 
 
 class LogtoVerifier:
@@ -91,8 +167,7 @@ class LogtoVerifier:
             logger.info("[auth] JWT 校验失败: %s", e)
             raise HTTPException(status_code=401, detail=f"Invalid token: {e}") from e
 
-        scope_raw = claims.get("scope") or ""
-        scopes = scope_raw.split() if isinstance(scope_raw, str) else list(scope_raw)
+        scopes = _as_string_list(claims.get("scope"))
         if self.required_scope and self.required_scope not in scopes:
             raise HTTPException(status_code=403, detail="Insufficient scope")
 
@@ -100,10 +175,14 @@ class LogtoVerifier:
         if not sub:
             raise HTTPException(status_code=401, detail="Token missing sub")
 
+        role, org_id, organizations, organization_roles = _auth_role_from_claims(claims)
         return AuthContext(
             user_id=sub,
-            org_id=claims.get("organization_id") or claims.get("org_id"),
+            org_id=org_id,
             scopes=scopes,
+            organizations=organizations,
+            organization_roles=organization_roles,
+            role=role,
             client_id=claims.get("client_id", "") or claims.get("aud", "") if isinstance(claims.get("aud"), str) else claims.get("client_id", ""),
             claims=claims,
             token=token,

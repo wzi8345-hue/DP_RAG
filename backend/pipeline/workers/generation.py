@@ -100,6 +100,7 @@ class GenerationWorker:
             raise RuntimeError("run messages not found")
 
         params = run.params or {}
+        kb_ids = [str(x) for x in (params.get("kb_ids") or []) if str(x)]
         auth = AuthContext(user_id=run.owner_id, org_id=run.org_id)
         if bool(params.get("professional")):
             _apply_skill_scope(self.pipeline, auth)
@@ -114,9 +115,12 @@ class GenerationWorker:
             for event in self.pipeline._get_query_flow().stream_chat_events(
                 query=user_msg.content,
                 session=session,
-                use_agentic=bool(params.get("use_agentic", True)),
+                # Agentic/professional 子图仍需完整接入 kb_id base filter；在单物理
+                # collection 迁移期间，默认走 simple/hybrid，避免任何未过滤检索越权。
+                use_agentic=False,
                 mode=params.get("mode"),
                 top_k=params.get("top_k"),
+                kb_ids=kb_ids,
                 professional=bool(params.get("professional", False)),
                 collection=params.get("collection"),
             ):

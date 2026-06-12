@@ -136,6 +136,61 @@ def _block_text(b: Dict[str, Any]) -> str:
     return ""
 
 
+def _block_bbox(b: Dict[str, Any]) -> Dict[str, Any]:
+    raw = b.get("bbox") or b.get("box")
+    page = int(b.get("page", 0) or 0)
+    if isinstance(raw, dict):
+        x0 = raw.get("x0", raw.get("left", raw.get("x")))
+        y0 = raw.get("y0", raw.get("top", raw.get("y")))
+        x1 = raw.get("x1", raw.get("right"))
+        y1 = raw.get("y1", raw.get("bottom"))
+        width = raw.get("width", raw.get("w"))
+        height = raw.get("height", raw.get("h"))
+        if x1 is None and x0 is not None and width is not None:
+            x1 = float(x0) + float(width)
+        if y1 is None and y0 is not None and height is not None:
+            y1 = float(y0) + float(height)
+    elif isinstance(raw, (list, tuple)) and len(raw) >= 4:
+        x0, y0, x1, y1 = raw[:4]
+    else:
+        return {}
+    try:
+        return {
+            "page": page,
+            "x0": float(x0),
+            "y0": float(y0),
+            "x1": float(x1),
+            "y1": float(y1),
+        }
+    except (TypeError, ValueError):
+        return {}
+
+
+def _union_bboxes(boxes: List[Dict[str, Any]]) -> Dict[str, Any]:
+    boxes = [b for b in boxes if b and isinstance(b, dict)]
+    if not boxes:
+        return {}
+    first_page = int(boxes[0].get("page", 0) or 0)
+    same_page = [b for b in boxes if int(b.get("page", -1)) == first_page]
+    if not same_page:
+        same_page = boxes[:1]
+    return {
+        "page": first_page,
+        "x0": min(float(b["x0"]) for b in same_page),
+        "y0": min(float(b["y0"]) for b in same_page),
+        "x1": max(float(b["x1"]) for b in same_page),
+        "y1": max(float(b["y1"]) for b in same_page),
+    }
+
+
+def _attach_bboxes(chunk: Dict[str, Any], boxes: List[Dict[str, Any]]) -> Dict[str, Any]:
+    clean = [b for b in boxes if b]
+    if clean:
+        chunk["bbox"] = _union_bboxes(clean)
+        chunk["bboxes"] = clean
+    return chunk
+
+
 def _is_drop_block(b: Dict[str, Any], min_conf: float) -> bool:
     """判断是否丢弃这个 block (NOISE / hidden / 低置信)。"""
     if not isinstance(b, dict):
@@ -296,10 +351,11 @@ def _equation_caption_for(
 
 def _build_paragraph_chunk(
     text: str, section: str, page: int, paragraph_index: int,
+    bboxes: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
     if not text or not text.strip():
         return None
-    return {
+    chunk = {
         "id": _short_id("text"),
         "type": "text",
         "section": section,
@@ -309,10 +365,12 @@ def _build_paragraph_chunk(
         "related_assets": [],
         "paragraph_index": paragraph_index,
     }
+    return _attach_bboxes(chunk, bboxes or [])
 
 
 def _build_equation_chunk(
     latex: str, section: str, page: int, eq_label: str = "",
+    bbox: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """latex 已剥过 $$ 时自动包一层, 已带 $$ 不重复。"""
     if not latex or not latex.strip():
@@ -321,7 +379,7 @@ def _build_equation_chunk(
     if not body.startswith("$$"):
         body = f"$$\n{body}\n$$"
     content = body if not eq_label else f"{eq_label}\n{body}"
-    return {
+    chunk = {
         "id": _short_id("equation"),
         "type": "equation",
         "section": section,
@@ -331,6 +389,7 @@ def _build_equation_chunk(
         "related_assets": [],
         "paragraph_index": -1,
     }
+    return _attach_bboxes(chunk, [bbox] if bbox else [])
 
 
 def _build_table_chunk(
@@ -344,7 +403,8 @@ def _build_table_chunk(
     lines.append(f"[Caption] {caption}" if caption else "[Table without caption]")
     if structure:
         lines.append(f"[Table HTML]\n{structure}")
-    return {
+    boxes = [_block_bbox(block)]
+    chunk = {
         "id": _short_id("table"),
         "type": "table",
         "section": section,
@@ -355,6 +415,7 @@ def _build_table_chunk(
         "paragraph_index": -1,
         "_label": label,
     }
+    return _attach_bboxes(chunk, boxes)
 
 
 def _build_image_chunk_from_caption(
@@ -372,7 +433,7 @@ def _build_image_chunk_from_caption(
     if not caption or len(caption) < 4:
         return None
     label = _extract_caption_label(caption, "image") or ""
-    return {
+    chunk = {
         "id": _short_id("image"),
         "type": "image",
         "section": section,
@@ -383,6 +444,7 @@ def _build_image_chunk_from_caption(
         "paragraph_index": -1,
         "_label": label,
     }
+    return _attach_bboxes(chunk, [_block_bbox(caption_block)])
 
 
 def _build_doc_title_chunk(
@@ -390,7 +452,7 @@ def _build_doc_title_chunk(
 ) -> Optional[Dict[str, Any]]:
     if not text or not text.strip():
         return None
-    return {
+    chunk = {
         "id": _short_id("title"),
         "type": "title",
         "section": "",
@@ -400,6 +462,7 @@ def _build_doc_title_chunk(
         "related_assets": [],
         "paragraph_index": -1,
     }
+    return chunk
 
 
 def _build_references_chunks_from_blocks(
@@ -409,12 +472,14 @@ def _build_references_chunks_from_blocks(
 ) -> List[Dict[str, Any]]:
     """把 UniParser 的 reference 类 block 按 batch 聚合为 references chunk。"""
     entries: List[str] = []
+    entry_boxes: List[Dict[str, Any]] = []
     pages_seen: set = set()
     for b in ref_blocks:
         txt = _block_text(b)
         if not txt:
             continue
         entries.append(txt)
+        entry_boxes.append(_block_bbox(b))
         pages_seen.add(int(b.get("page", -1)))
     if not entries:
         return []
@@ -425,7 +490,7 @@ def _build_references_chunks_from_blocks(
         content = "\n\n".join(batch).strip()
         if not content:
             continue
-        out.append({
+        chunk = {
             "id": _short_id("references"),
             "type": "references",
             "section": section or "References",
@@ -437,7 +502,8 @@ def _build_references_chunks_from_blocks(
             "ref_index_start": i + 1,
             "ref_index_end": i + len(batch),
             "ref_count": len(batch),
-        })
+        }
+        out.append(_attach_bboxes(chunk, entry_boxes[i : i + len(batch)]))
     return out
 
 
@@ -679,15 +745,16 @@ def build_knowledge_blocks_uniparser(
     # 摘要 section 内所有 paragraph 累积起来, 整段合成单个 summary chunk (避免被段落切碎)
     pending_summary_texts: List[str] = []
     pending_summary_pages: set = set()
+    pending_summary_bboxes: List[Dict[str, Any]] = []
 
     def _flush_pending_summary() -> None:
-        nonlocal pending_summary_texts, pending_summary_pages
+        nonlocal pending_summary_texts, pending_summary_pages, pending_summary_bboxes
         if not pending_summary_texts:
             return
         content = "\n\n".join(t for t in pending_summary_texts if t.strip()).strip()
         content = _clip_summary_text(_strip_summary_prefix(content))
         if content:
-            chunks.append({
+            summary_chunk = {
                 "id": _short_id("summary"),
                 "type": "summary",
                 "section": cur_section or "",
@@ -696,9 +763,11 @@ def build_knowledge_blocks_uniparser(
                 "context": "",
                 "related_assets": [],
                 "paragraph_index": _next_para_idx(),
-            })
+            }
+            chunks.append(_attach_bboxes(summary_chunk, pending_summary_bboxes))
         pending_summary_texts = []
         pending_summary_pages = set()
+        pending_summary_bboxes = []
 
     def _flush_pending_paragraphs() -> None:
         """把缓冲的连续 paragraph 块按 MinerU 逻辑段落分组后成 text chunk。
@@ -724,6 +793,7 @@ def build_knowledge_blocks_uniparser(
                 "type": "paragraph",
                 "content": {"paragraph_content": [{"type": "text", "content": txt}]},
                 "_page": int(pb.get("page", 0)),
+                "_bbox": _block_bbox(pb),
             })
         if not mineru_items:
             return
@@ -734,10 +804,12 @@ def build_knowledge_blocks_uniparser(
             if not combined:
                 continue
             pages_in_group = sorted({int(it.get("_page", 0)) for it in group})
+            bboxes_in_group = [it.get("_bbox") for it in group if isinstance(it.get("_bbox"), dict)]
             page = pages_in_group[0] if pages_in_group else 0
             para_idx = -1 if is_preamble else _next_para_idx()
             base = _build_paragraph_chunk(
                 combined, section=cur_section, page=page, paragraph_index=para_idx,
+                bboxes=bboxes_in_group,
             )
             if not base:
                 continue
@@ -757,6 +829,9 @@ def build_knowledge_blocks_uniparser(
             for sc in split:
                 if "paragraph_index" not in sc:
                     sc["paragraph_index"] = base["paragraph_index"]
+                if "bbox" not in sc and base.get("bbox"):
+                    sc["bbox"] = base["bbox"]
+                    sc["bboxes"] = base.get("bboxes", [])
                 if is_preamble and sc.get("type") == "text":
                     sc["is_preamble"] = True
             chunks.extend(split)
@@ -807,6 +882,9 @@ def build_knowledge_blocks_uniparser(
             if txt and not _is_metadata_line(txt):
                 pending_summary_texts.append(txt)
                 pending_summary_pages.add(int(b.get("page", 0)))
+                bbox = _block_bbox(b)
+                if bbox:
+                    pending_summary_bboxes.append(bbox)
             continue
 
         # —— equation 块 -> equation chunk ——
@@ -821,6 +899,7 @@ def build_knowledge_blocks_uniparser(
                 latex, section=cur_section,
                 page=int(b.get("page", 0)),
                 eq_label=eq_label_text,
+                bbox=_block_bbox(b),
             )
             if ec:
                 chunks.append(ec)

@@ -7,6 +7,7 @@ export default {
     chat: '智能问答',
     library: '文献管理',
     skills: '专家技能',
+    admin: '管理',
     settings: '设置',
     newChat: '新对话',
     noConversations: '暂无历史对话',
@@ -45,6 +46,14 @@ export default {
     callbackError: '登录回调处理失败',
     required: '请先登录以使用平台',
     account: '账号',
+  },
+  admin: {
+    title: '组织管理',
+    forbidden: '当前账号没有管理权限',
+    noOrg: '无组织',
+    ingestTasks: '解析任务',
+    generationRuns: '生成任务',
+    auditLogs: '审计日志',
   },
   chat: {
     title: '智能问答',

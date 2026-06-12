@@ -91,11 +91,13 @@ DP_RAG/
    - `aud` 含 `https://funmg.dp.tech/sci-loop-api`
    - `exp` / `nbf`
    - `scope` 含 `all:data`
-3. 提取用户上下文 `AuthContext`：`user_id = sub`、`org_id`（若 token 含组织信息）、`roles`/`scopes`。
+3. 提取用户上下文 `AuthContext`：`user_id = sub`、`org_id`、`organizations`、`organization_roles`、`role=user|admin|root`、`scopes`。Logto 组织角色 claim 形如 `<org_id>:sci-loop-admin`，后端按 `root > admin > user` 取最高角色；角色模板名可由 `LOGTO_ROLE_USER/ADMIN/ROOT` 覆盖。
 4. 注入到依赖：`current_user = Depends(require_auth)`。
 5. 兼容开发：`AUTH_DISABLED=1` 时跳过校验，使用固定 `dev` 用户（仅本地）。
 
-> 过渡：旧 `API_KEYS` 鉴权移除；运维只读接口（health/stats）保持免认证。
+> 组织变更语义：Logto 是身份与当前组织成员关系的权威源；Postgres 是业务资源归属的权威源。Logto 后台修改用户组织/角色后，只影响刷新 token 后的新请求与新建资源，不自动迁移历史资源的 `owner_id/org_id/visibility`。
+
+> 过渡：旧 `API_KEYS` 鉴权移除；`/health` 可作为探针，`/stats` 与日志查看需 admin/root。
 
 ### 3.4 可见性模型
 
@@ -105,29 +107,37 @@ DP_RAG/
 - `org_id`（可空）
 - `visibility`：`private`（默认，仅 owner）/ `org`（组织内部可读）/ `public`（平台所有用户可读）
 
-访问规则：
+普通访问规则：
 
 - **读**：`owner_id == me` 或（`visibility == org` 且 `org_id == my_org`）或 `visibility == public`。
-- **写/删**：仅 `owner_id == me`。
+- **写**：默认仅 `owner_id == me`。
+- **设置 `org` 可见**：无组织普通用户禁止；root 可管理已有组织资源。
 - 列表接口返回 `private(mine) ∪ org(my_org) ∪ public`，并标注 `mine: bool` 与 `visibility`。
 - 对话分享链接与 `visibility` 解耦：`conversation_shares` 记录不透明 token；撤销后 token 失效。其他用户通过分享继续对话时，后端复制当前主线为自己的私有对话（`forked_from` 仅审计），后续新轮次只使用新 owner 可读的文献库与 skill。
+
+管理访问规则：
+
+- `sci-loop-admin`：通过 `/admin/resources/*` 管理同 `org_id` 用户的 KB、文献、对话、skill、generation runs、ingest tasks，包括 private 数据；普通列表不混入这些私有数据。
+- `sci-loop-root`：通过 admin API 管理全平台资源，包括无组织用户资源。
+- owner、admin、root 的敏感管理动作写入 `audit_logs`；admin/root 查看他人 private 数据也写审计。
 
 ### 3.5 RAG 检索权限链路
 
 Milvus 不保存用户权限，也不做 `owner/org/public` 判断。权限判断统一在 Postgres/repo 层完成，检索链路必须满足：
 
-1. 前端从 `/collections` 只拿到当前用户可读的 collection：`private(mine) ∪ org(my_org) ∪ public`。
-2. 发起 RAG 问答时必须显式携带 `collection`。后端在 `/chat/append` 与 `/query` 中先查 `kb_collections` 并执行 `require_read(auth, collection)`；未传 collection 时直接拒绝，避免回退默认 Milvus 集合导致越权检索。
-3. 通过校验后，后端才把该 collection 名传给 `QueryFlow` / Milvus retriever。Milvus 只在这个已授权 collection 内召回 chunk。
-4. professional mode 的自定义 skill 也先从 `user_skills` 计算当前用户可读 `allowed_ids`，注入 `professional.skills.allowed_ids`，避免共享/复制对话继续使用原 owner 私有 skill。
-5. copy-on-continue 后新对话 owner 变为当前用户，后续新轮次重新按当前用户 `AuthContext` 计算 collection/skill 可见范围，不继承源对话 owner 的资源权限。
+1. 前端默认不要求用户选择知识库；不传筛选条件时语义为 `all_accessible`。
+2. 后端在 `/chat/append` 与 `/query` 中根据 `AuthContext` 从 Postgres 计算当前用户可读 `kb_ids = private(mine) ∪ org(my_org) ∪ public`。
+3. 如果前端传入高级筛选 `kb_ids` / 单个 `collection`，后端取 `requested ∩ readable`；交集为空则拒绝。
+4. 后端把最终 `kb_ids` 下推给 Milvus filter：`kb_id in [...]`。Milvus 只在统一物理 collection 的授权 KB 范围内召回 chunk。
+5. professional mode 的自定义 skill 也先从 `user_skills` 计算当前用户可读 `allowed_ids`，注入 `professional.skills.allowed_ids`，避免共享/复制对话继续使用原 owner 私有 skill。
+6. copy-on-continue 后新对话 owner 变为当前用户，后续新轮次重新按当前用户 `AuthContext` 计算 KB/skill 可见范围，不继承源对话 owner 的资源权限。
 
 ```mermaid
 flowchart LR
-  userReq["Chat request with collection"] --> authCheck["Logto AuthContext"]
-  authCheck --> pgCheck["Postgres kb_collections can_read"]
-  pgCheck -->|"allowed"| milvusSearch["Milvus search in selected collection"]
-  pgCheck -->|"denied"| reject["403/404 reject"]
+  userReq["Chat request"] --> authCheck["Logto AuthContext"]
+  authCheck --> pgScope["Postgres readable kb_ids"]
+  pgScope -->|"non-empty"| milvusSearch["Milvus search with kb_id filter"]
+  pgScope -->|"empty"| reject["403 reject"]
   milvusSearch --> answer["LLM context + answer"]
 ```
 
@@ -138,7 +148,7 @@ flowchart LR
 | 存储 | 权威职责 | 保存内容 | 不保存/不负责 |
 |------|----------|----------|---------------|
 | Postgres | 业务权威状态、权限、任务状态、事件回放索引 | 用户/组织归属、visibility、conversations/messages、generation_runs/message_events、kb_collections/documents、ingest_tasks/items/events、user_skills、conversation_shares | 向量索引、大体积 PDF/解析产物、低延迟临时 fanout |
-| Milvus | 文献 chunk 向量与检索索引 | 每个 Milvus collection 内的 chunk rows：dense/sparse 向量、content、context、doc_id/doc_name、chunk_id、type、section、page_start、paragraph_index、publication_year、related_assets 等 | 用户权限、conversation、task 状态、PDF 原文、完整解析产物 |
+| Milvus | 文献 chunk 向量与检索索引 | 单物理 `literature_chunks` collection 内的 chunk rows：`kb_id`、dense/sparse 向量、content、context、doc_id/doc_name、chunk_id、type、section、page_start、paragraph_index、publication_year、bbox/related_assets 等 | 用户权限、conversation、task 状态、PDF 原文、完整解析产物 |
 | Redis | 运行时队列与低延迟事件分发 | generation run queue、generation run stream、ingest task queue、ingest task stream，短 TTL 事件副本 | 权威任务状态、长期消息内容、权限判断 |
 | RustFS/S3 | 大文件与可重建 artifacts | 原始 PDF、解析 JSON、向量/meta sidecar、run artifacts（如专家模式完整大上下文） | 权限判断、向量搜索、任务状态 |
 
@@ -176,7 +186,7 @@ messages
   usage           jsonb null
   latency_s       float null
   -- 生成参数快照（便于"基于此分支重生成"）
-  params          jsonb null      -- {mode, top_k, professional, use_agentic, sources, collection, doc_ids}
+  params          jsonb null      -- {mode, top_k, professional, use_agentic, sources, kb_ids, doc_ids}
   status          text            -- pending | streaming | done | failed | stopped
   error           text null
   created_at      timestamptz
@@ -226,11 +236,11 @@ message_events
 
 ### 5.3 kb_collections（文献库归属）
 
-Milvus 集合 + 本地工作目录仍是物理存储；本表记录归属与可见性元数据。
+业务知识库只存在于 Postgres；`name` 是业务 `kb_id/slug`，不再代表 Milvus 物理 collection 名。所有 KB 的 chunk 统一写入 `MILVUS_COLLECTION` 指定的物理 collection。
 
 ```text
 kb_collections
-  name            text pk         -- Milvus 集合名 kb_xxx
+  name            text pk         -- 业务 kb_id/slug
   display_name    text
   owner_id        text
   org_id          text null
@@ -238,21 +248,21 @@ kb_collections
   created_at / updated_at
 ```
 
-> 物理隔离策略：集合名加 owner 维度（`kb_<ownerhash>_<slug>`），保证不同用户同名库不冲突；上传/检索时强制带 owner 校验。本地工作目录 `UPLOAD_DIR/<owner_id>/kb_xxx/`。
+> Milvus 物理隔离不再使用多个 collection；权限隔离由 Postgres `kb_collections` 计算 readable `kb_id`，检索时通过 Milvus `kb_id in [...]` filter 实现。
 
 ### 5.4 documents（文献条目，文献管理页）
 
 ```text
 documents
   id              uuid pk
-  collection_name text fk -> kb_collections.name
+  collection_name text fk -> kb_collections.name  -- 业务 kb_id
   owner_id        text
   doc_id          text            -- pipeline doc_id（原文件名 stem）
   title           text
   filename        text
   year            int null
   pdf_object_key  text null       -- RustFS/S3 原始 PDF
-  artifact_prefix text null       -- RustFS/S3 解析产物前缀 <collection>/<doc_id>/
+  artifact_prefix text null       -- RustFS/S3 解析产物前缀 <kb_id>/<doc_id>/
   source_document_id text null    -- copy-to-mine 来源
   status          text            -- parsing | ready | failed
   task_id         text null       -- 关联异步灌入任务
@@ -268,7 +278,7 @@ documents
 ingest_tasks
   id              text pk
   owner_id / org_id
-  collection_name text fk -> kb_collections.name
+  collection_name text fk -> kb_collections.name  -- 业务 kb_id
   kind            text            -- upload / rebuild / parse / load_vec
   status          text            -- queued | running | done | failed | cancelled
   progress        float
@@ -282,7 +292,7 @@ ingest_tasks
 ingest_task_items
   id              text pk
   task_id         text fk -> ingest_tasks.id
-  collection_name / owner_id / doc_id
+  collection_name / owner_id / doc_id             -- collection_name 为业务 kb_id
   filename        text
   pdf_path / doc_dir text       -- worker 当前任务使用的本地缓存路径
   pdf_object_key / artifact_prefix text
@@ -328,24 +338,43 @@ conversation_shares
 
 分享链接只授予源对话的只读访问；撤销只让 token 失效，不影响已 copy-to-mine 的独立副本。
 
-### 5.8 对象存储（RustFS / S3 compatible）
+### 5.8 audit_logs（管理审计）
+
+```text
+audit_logs
+  id              bigserial pk
+  actor_id        text            -- 执行动作的 Logto sub
+  actor_role      text            -- user | admin | root
+  actor_org_id    text null
+  target_owner_id text null
+  resource_type   text            -- kb_collection | document | conversation | skill | generation_run | ingest_task
+  resource_id     text
+  action          text            -- admin_list | admin_read | set_visibility | delete | cancel | stop | stream
+  metadata        jsonb
+  created_at      timestamptz
+```
+
+admin/root 查看他人 private 数据、修改可见性、删除资源、取消任务、停止 run 都应写入审计日志。
+
+### 5.9 对象存储（RustFS / S3 compatible）
 
 新增 `backend/pipeline/clients/object_store.py`，通过 `boto3` 连接自建 RustFS（S3 path-style + v4 签名）。用途：
 
-- 保存原始 PDF：`<collection>/<doc_id>/source.pdf`，供引用原文 tab 预签名访问。
-- 保存解析/向量/meta 产物：`<collection>/<doc_id>/...`，用于 rebuild / re-ingest，替代单机本地磁盘作为长期事实来源。
+- 保存原始 PDF：`<kb_id>/<doc_id>/source.pdf`，供引用原文 tab 预签名访问。
+- 保存解析/向量/meta 产物：`<kb_id>/<doc_id>/...`，用于 rebuild / re-ingest，替代单机本地磁盘作为长期事实来源。
 - 前端不经后端转发大文件；后端 `POST /documents/pdf-url` 读权限校验后返回短期预签名 URL。
 
 ---
 
 ## 6. Milvus 数据模型
 
-Milvus 只存“可检索的文献 chunk 数据”，不存用户权限、不存对话、不存任务状态。权限由 Postgres 的 `kb_collections/documents` 控制；后端只有在 collection 通过 `can_read` 后才会访问对应 Milvus collection。
+Milvus 只存“可检索的文献 chunk 数据”，不存用户权限、不存对话、不存任务状态。权限由 Postgres 的 `kb_collections/documents` 控制；后端先计算可读 `kb_ids`，再在统一物理 collection 中用 `kb_id in [...]` filter 检索。
 
-每个文献库对应一个 Milvus collection（例如 `kb_xxx`）。chunk row 主要字段：
+全平台默认使用一个物理 collection（默认 `literature_chunks`）。chunk row 主要字段：
 
 ```text
-pk                 varchar       -- Milvus 主键，通常由 doc_id/chunk_id 派生
+pk                 varchar       -- Milvus 主键，{kb_id}::{doc_id}::{chunk_id}
+kb_id              varchar       -- 业务知识库 id/slug，来自 Postgres kb_collections.name
 doc_id             varchar       -- 文献内部 id，通常是 PDF 文件名 stem
 doc_name           varchar       -- 文献标题/显示名
 chunk_id           varchar       -- chunk id
@@ -360,13 +389,17 @@ page_start         int
 paragraph_index    int
 publication_year   int
 related_assets     json/string   -- 图表/公式/正文互相关联信息
+bbox               json          -- 当前 chunk 的主定位框 {page,x0,y0,x1,y1}
+bboxes             json          -- 跨 block/chunk 的多个定位框
+page_width         int           -- bbox 坐标所属页面宽度（有则用于前端缩放）
+page_height        int           -- bbox 坐标所属页面高度（有则用于前端缩放）
 ```
 
 使用方式：
 
-- 入库：`knowledge_blocks_vec.json` → `MilvusIngester.ingest_file()` → upsert rows。
-- 检索：`QueryFlow` 根据授权后的 `collection` 创建 retriever，只在这个 collection 内召回。
-- 展示引用：前端拿 `hits` 中的 `doc_id/page_start/chunk_id/content` 渲染引用与来源；PDF 原文不来自 Milvus，而来自 RustFS 预签名 URL。
+- 入库：`knowledge_blocks_vec.json` + 业务 `kb_id` → `MilvusIngester.ingest_file(kb_id=...)` → upsert rows 到统一物理 collection。
+- 检索：`QueryFlow` 使用后端计算出的可读 `kb_ids` 构造 Milvus filter：`kb_id in [...]`。
+- 展示引用：前端拿 `hits` 中的 `kb_id/doc_id/page_start/chunk_id/content/bbox` 渲染引用与来源；PDF 原文不来自 Milvus，而来自 RustFS 预签名 URL。
 
 ---
 
@@ -413,14 +446,14 @@ RustFS 存大文件与可重建 artifacts，不做权限判断。所有读取都
 当前 key 规范：
 
 ```text
-<collection>/<doc_id>/source.pdf
+<kb_id>/<doc_id>/source.pdf
   原始 PDF，引用原文 tab 使用
 
-<collection>/<doc_id>/knowledge_blocks.json
-<collection>/<doc_id>/knowledge_blocks_vec.json
-<collection>/<doc_id>/knowledge_blocks_meta.json
-<collection>/<doc_id>/uniparser_result.json
-<collection>/<doc_id>/uniparser_meta.json
+<kb_id>/<doc_id>/knowledge_blocks.json
+<kb_id>/<doc_id>/knowledge_blocks_vec.json
+<kb_id>/<doc_id>/knowledge_blocks_meta.json
+<kb_id>/<doc_id>/uniparser_result.json
+<kb_id>/<doc_id>/uniparser_meta.json
 ...
   解析、分块、向量、meta 产物，用于 rebuild/re-ingest
 
@@ -429,6 +462,8 @@ runs/<owner_id>/<run_id>/...
 ```
 
 对象存储 key 会在 Postgres 中以 `documents.pdf_object_key`、`documents.artifact_prefix`、`ingest_task_items.pdf_object_key`、`ingest_task_items.artifact_prefix` 等字段建立索引关系。
+
+> Milvus schema 增加了 `kb_id/bbox/bboxes/page_width/page_height`，不保留旧 schema 兼容。部署该版本后需要 drop/recreate `MILVUS_COLLECTION`（默认 `literature_chunks`）并重新入库。
 
 ---
 
@@ -487,7 +522,8 @@ class RetrievalSource(Protocol):
 | 文献 | `GET /ingest/tasks/{task_id}` `GET /ingest/tasks/{task_id}/stream` `POST /ingest/tasks/{task_id}/cancel` | 解析入库任务状态、事件流回放/实时输出、取消 | 新增 |
 | 文献 | `GET /collections/{name}/documents` `DELETE /collections/{name}/documents/{doc_id}` `POST /documents/pdf-url` `POST /collections/copy-to-mine` | 文献增删查、PDF 预签名、复制到个人 | 改造/新增 |
 | 技能 | `GET /skills` `POST /skills` `DELETE /skills/{id}` `PATCH /skills/{id}/visibility` `POST /skills/copy-to-mine` `/skills/template` | skill CRUD + 可见性 + 复制到个人（M9.6 统一 POST） | 改造 |
-| 运维 | `GET /health` `GET /stats`；`POST /doc_summary` | 健康/统计免认证（GET）；doc_summary 业务接口（POST） | 保留/改造 |
+| 管理 | `GET /admin/me` `/admin/resources/*` `/admin/audit-logs` | org admin/root 查看管理范围内资源与审计日志；普通资源列表不混入管理视图 | 新增 |
+| 运维 | `GET /health` `GET /stats` `GET /logs/sessions*`；`GET /doc_summary` | health 可作探针；stats/logs 需 admin/root；doc_summary 需文献读权限 | 保留/改造 |
 
 ### 10.2 SSE 事件协议（保持兼容并扩展）
 
