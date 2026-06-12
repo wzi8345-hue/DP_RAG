@@ -205,7 +205,10 @@ export interface SkillSpec {
   name: string;
   description?: string;
   priority?: number;
-  triggers?: string[];
+  when_to_use?: string;
+  when_not_to_use?: string;
+  examples?: string[];
+  anti_examples?: string[];
   prefer_first_paths?: string[];
   sufficiency?: SkillSufficiency;
   tuning?: SkillTuning;

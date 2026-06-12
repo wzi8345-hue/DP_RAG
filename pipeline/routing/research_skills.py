@@ -41,7 +41,11 @@ class ResearchSkill:
     name: str
     description: str = ""
     priority: int = 0
-    triggers: List[str] = field(default_factory=list)
+    # 自描述段 (供 LLM 路由判断, 取代触发词关键字匹配)
+    when_to_use: str = ""
+    when_not_to_use: str = ""
+    examples: List[str] = field(default_factory=list)       # 正例: 应命中本技能的问题
+    anti_examples: List[str] = field(default_factory=list)  # 反例: 不应命中 (易混)
     # 提示词正文 (plan/policy 为"替换段"; synthesis 为整段 system/thinking/user)
     plan_system: str = ""
     policy_system: str = ""
@@ -112,6 +116,34 @@ def _split_sections(body: str) -> Dict[str, str]:
     return sections
 
 
+def _parse_bullets(text: str) -> List[str]:
+    """把 markdown 无序/有序列表正文解析成条目列表 (剥掉 -/*/数字. 前缀)。"""
+    items: List[str] = []
+    for line in (text or "").splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        m = re.match(r"^(?:[-*+]|\d+[.)])\s+(.*)$", s)
+        items.append(m.group(1).strip() if m else s)
+    return [i for i in items if i]
+
+
+# SKILL.md 自描述段的标题别名 (英文/中文都认), 统一映射到字段
+_SECTION_ALIASES = {
+    "when_to_use": ("when to use", "适用场景", "何时使用", "适用"),
+    "when_not_to_use": ("when not to use", "不适用场景", "何时不用", "不适用"),
+    "examples": ("examples", "正例", "命中示例", "示例"),
+    "anti_examples": ("anti-examples", "anti examples", "反例", "不命中示例"),
+}
+
+
+def _section(sections: Dict[str, str], field_key: str) -> str:
+    for alias in _SECTION_ALIASES.get(field_key, ()):  # noqa: B007
+        if alias in sections:
+            return sections[alias]
+    return ""
+
+
 def parse_skill_dir(d: str) -> Optional[ResearchSkill]:
     """解析单个 skill 文件夹; 缺 SKILL.md / plan.md / policy.md 则跳过 (返回 None)。"""
     skill_md = os.path.join(d, "SKILL.md")
@@ -131,6 +163,10 @@ def parse_skill_dir(d: str) -> Optional[ResearchSkill]:
     sb_sections = _split_sections(_read(os.path.join(d, "synthesis.md")))
     desc_sections = _split_sections(body)
     description = desc_sections.get("description") or body.strip()
+    when_to_use = _section(desc_sections, "when_to_use")
+    when_not_to_use = _section(desc_sections, "when_not_to_use")
+    examples = _parse_bullets(_section(desc_sections, "examples"))
+    anti_examples = _parse_bullets(_section(desc_sections, "anti_examples"))
 
     tuning = meta.get("tuning") or {}
     if not isinstance(tuning, dict):
@@ -153,7 +189,10 @@ def parse_skill_dir(d: str) -> Optional[ResearchSkill]:
         name=str(meta.get("name") or sid),
         description=str(description or "").strip(),
         priority=_opt_int(meta.get("priority")) or 0,
-        triggers=[str(t) for t in (meta.get("triggers") or []) if str(t).strip()],
+        when_to_use=str(when_to_use or "").strip(),
+        when_not_to_use=str(when_not_to_use or "").strip(),
+        examples=examples,
+        anti_examples=anti_examples,
         plan_system=plan_body,
         policy_system=policy_body,
         synthesis_system=sb_sections.get("system", ""),
@@ -203,7 +242,6 @@ def load_skills(dirs: List[str]) -> Dict[str, ResearchSkill]:
 # ---------------------------------------------------------------------------
 
 DEFAULT_MIN_CONFIDENCE = 0.6     # 思考模型给出的"强匹配"置信度下限
-DEFAULT_STRONG_MIN_HITS = 2      # 触发词"强命中"所需的最少命中数
 
 
 @dataclass
@@ -218,34 +256,31 @@ class SkillSelection:
 _ROUTER_SYSTEM = (
     "你是研究任务类型分类器, 需要谨慎判断, 宁缺毋滥。\n"
     "规则:\n"
-    "1) 只有当用户问题与某个候选任务类型【明确、强匹配】(问题的核心诉求正好就是该任务类型在做的事) 时, 才选它;\n"
-    "2) 只要稍有牵强、模棱两可、或只是泛泛而问, 一律选 none —— 让系统走通用流程, 不要勉强套用;\n"
-    "3) 先用一句话给出判断依据, 再给结论与置信度。\n"
+    "1) 只有当用户问题与某个候选任务类型【明确、强匹配】(问题的核心诉求正好就是该任务类型在做的事, "
+    "且符合其「适用」、贴近其「正例」) 时, 才选它;\n"
+    "2) 若问题落入某类型的「不适用」或更像其「反例」, 不要选它;\n"
+    "3) 只要稍有牵强、模棱两可、或只是泛泛而问, 一律选 none —— 让系统走通用流程, 不要勉强套用;\n"
+    "4) 先用一句话给出判断依据, 再给结论与置信度。\n"
     "严格只输出一个 JSON 对象 (不要 Markdown 代码块、不要多余文字):\n"
     '{"reason": "<一句话中文判断依据>", "skill": "<任务类型id 或 none>", "confidence": <0到1之间的小数>}'
 )
 
 
-def _heuristic_scan(
-    query: str, skills: Dict[str, ResearchSkill],
-) -> List[Tuple[str, int, List[str]]]:
-    """对每个 skill 统计触发词命中, 按 (命中数, priority) 降序返回 [(id, hits, 命中词)]。"""
-    q = query or ""
-    rows: List[Tuple[str, int, List[str], int]] = []
-    for s in skills.values():
-        matched: List[str] = []
-        for trig in s.triggers:
-            t = str(trig)
-            try:
-                if re.search(t, q, re.I):
-                    matched.append(t)
-            except re.error:
-                if t.lower() in q.lower():
-                    matched.append(t)
-        if matched:
-            rows.append((s.id, len(matched), matched, s.priority))
-    rows.sort(key=lambda r: (r[1], r[3]), reverse=True)
-    return [(r[0], r[1], r[2]) for r in rows]
+def _format_candidate(s: ResearchSkill) -> str:
+    """把单个 skill 渲染成候选说明块 (适用/不适用/正例/反例), 供分类模型判断。"""
+    lines = [f"### {s.id}（{s.name}）"]
+    head = s.when_to_use or ((s.description or "").splitlines()[0] if s.description else "")
+    if head:
+        lines.append(f"适用: {head}")
+    if s.when_not_to_use:
+        lines.append(f"不适用: {s.when_not_to_use}")
+    if s.examples:
+        lines.append("正例:")
+        lines += [f"  - {e}" for e in s.examples[:5]]
+    if s.anti_examples:
+        lines.append("反例:")
+        lines += [f"  - {e}" for e in s.anti_examples[:5]]
+    return "\n".join(lines)
 
 
 def _parse_router_json(
@@ -279,19 +314,17 @@ def _parse_router_json(
 
 def _llm_select_reasoned(
     llm: Any, query: str, skills: Dict[str, ResearchSkill],
-    *, hint: str, prev_skill_id: Optional[str],
+    *, prev_skill_id: Optional[str],
     max_tokens: int, disable_thinking: bool, correlation_id: str,
 ) -> Tuple[Optional[str], float, str]:
-    """思考型分类: 让模型推理并输出 JSON {skill, confidence, reason}。"""
-    listing = "\n".join(
-        f"- {s.id} ({s.name}): {(s.description or '').splitlines()[0] if s.description else ''}"
-        for s in skills.values()
-    )
+    """思考型分类: 让模型推理并输出 JSON {skill, confidence, reason}。
+
+    候选清单含每个技能的「适用/不适用/正例/反例」自描述, 不再依赖关键词触发。
+    """
+    listing = "\n\n".join(_format_candidate(s) for s in skills.values())
     extra = ""
-    if hint:
-        extra += f"\n关键词初筛倾向 (仅供参考, 不一定准): {hint}"
     if prev_skill_id and prev_skill_id in skills:
-        extra += f"\n上一轮采用的任务类型: {prev_skill_id} (若本轮问题确实仍属此类型可延续, 否则照常判 none)"
+        extra += f"\n\n上一轮采用的任务类型: {prev_skill_id} (若本轮问题确实仍属此类型可延续, 否则照常判 none)"
     user = (
         f"用户研究型问题: {query}\n\n候选任务类型:\n{listing}{extra}\n\n"
         "请判断该问题是否强匹配其中某一个任务类型, 按要求只输出 JSON。"
@@ -313,86 +346,44 @@ def select_skill(
     query: str,
     skills: Dict[str, ResearchSkill],
     *,
-    mode: str = "hybrid",
+    mode: str = "llm",
     prev_skill_id: Optional[str] = None,
     router_max_tokens: int = 256,
     disable_thinking: bool = False,
     min_confidence: float = DEFAULT_MIN_CONFIDENCE,
-    strong_min_hits: int = DEFAULT_STRONG_MIN_HITS,
     correlation_id: str = "-",
 ) -> SkillSelection:
     """选 skill。仅在【强匹配】时返回具体 skill, 否则返回 skill_id=None (回退通用)。
 
-    mode: off=不选(始终通用) | heuristic=仅触发词强命中 | llm=仅思考模型 | hybrid=思考模型为主、触发词强命中兜底。
-    强匹配判定:
-      - 思考模型给出某 skill 且 confidence ≥ min_confidence; 或
-      - 触发词命中数 ≥ strong_min_hits (关键词强命中)。
-    单个触发词命中 / 模型低置信 / 模棱两可 → 一律 None, 走通用逻辑。
+    判定完全交给思考模型: 依据每个技能的「适用/不适用/正例/反例」自描述判断,
+    模型给出某 skill 且 confidence ≥ min_confidence 才算强匹配; 模棱两可一律 None。
+
+    mode: off=不选(始终通用) | 其它(llm)=思考模型判断。
+    无可用 LLM 时无法判断 → 一律 None (回退通用)。
     """
     if not skills or str(mode).lower() == "off":
         return SkillSelection(None, 0.0, "skills 关闭", "技能系统未启用，按通用研究方式处理。")
-    mode = str(mode).lower()
 
-    scan = _heuristic_scan(query, skills)
-    top = scan[0] if scan else None
-    top_id = top[0] if top else None
-    top_hits = top[1] if top else 0
-    top_terms = top[2] if top else []
-    hint = (
-        f"{top_id}（命中触发词 {('、'.join(top_terms))}）" if top and top_hits else "无关键词命中"
+    if llm is None:
+        return SkillSelection(
+            None, 0.0, "无可用分类模型",
+            "未配置分类模型，无法判断任务类型，按通用研究方式处理。",
+        )
+
+    sid, conf, reason = _llm_select_reasoned(
+        llm, query, skills, prev_skill_id=prev_skill_id,
+        max_tokens=router_max_tokens, disable_thinking=disable_thinking,
+        correlation_id=correlation_id,
     )
-    strong_kw = bool(top and top_hits >= strong_min_hits)
-
-    # 纯触发词模式: 只认强命中
-    if mode == "heuristic":
-        if strong_kw:
-            conf = min(1.0, 0.5 + 0.2 * top_hits)
-            return SkillSelection(
-                top_id, conf, f"触发词强命中×{top_hits}",
-                f"用户问题强命中「{skills[top_id].name}」的触发词（{'、'.join(top_terms)}），判定为该任务类型。",
-            )
+    reason_disp = reason or "（模型未给出依据）"
+    if sid and conf >= min_confidence:
         return SkillSelection(
-            None, 0.0, "触发词未强命中",
-            f"仅{('命中 ' + '、'.join(top_terms)) if top_terms else '无关键词命中'}，"
-            "不足以强匹配任何专门技能，按通用研究方式处理。",
-        )
-
-    # llm / hybrid: 思考模型为决策主体
-    if llm is not None:
-        sid, conf, reason = _llm_select_reasoned(
-            llm, query, skills, hint=hint, prev_skill_id=prev_skill_id,
-            max_tokens=router_max_tokens, disable_thinking=disable_thinking,
-            correlation_id=correlation_id,
-        )
-        reason_disp = reason or "（模型未给出依据）"
-        if sid and conf >= min_confidence:
-            return SkillSelection(
-                sid, conf, "思考模型强匹配",
-                f"{reason_disp}（判定为「{skills[sid].name}」，置信度 {conf:.0%}）。",
-            )
-        # 模型不确定, 但触发词强命中 → 用关键词兜底 (仍属强匹配)
-        if mode == "hybrid" and strong_kw:
-            kw_conf = min(1.0, 0.5 + 0.2 * top_hits)
-            return SkillSelection(
-                top_id, kw_conf, "触发词强命中兜底",
-                f"模型未给出高置信判断，但问题强命中「{skills[top_id].name}」的触发词"
-                f"（{'、'.join(top_terms)}），按该任务类型处理。",
-            )
-        return SkillSelection(
-            None, conf, "未强匹配",
-            f"{reason_disp} 未达到强匹配标准，按通用研究方式处理。",
-        )
-
-    # 无可用 LLM 的 hybrid → 退化为触发词强命中
-    if strong_kw:
-        conf = min(1.0, 0.5 + 0.2 * top_hits)
-        return SkillSelection(
-            top_id, conf, f"触发词强命中×{top_hits}",
-            f"用户问题强命中「{skills[top_id].name}」的触发词（{'、'.join(top_terms)}），判定为该任务类型。",
+            sid, conf, "思考模型强匹配",
+            f"{reason_disp}（判定为「{skills[sid].name}」，置信度 {conf:.0%}）。",
         )
     return SkillSelection(
-        None, 0.0, "未强匹配",
-        "未强匹配到任何专门技能，按通用研究方式处理。",
+        None, conf, "未强匹配",
+        f"{reason_disp} 未达到强匹配标准，按通用研究方式处理。",
     )
 
 
@@ -406,11 +397,35 @@ _NUM_UNIT_RE = re.compile(
     re.I,
 )
 
+# 因果/机理连接词: 证据里出现才算讲清了"原因→过程→结果", 否则多为现象描述。
+_CAUSAL_RE = re.compile(
+    r"(因为|由于|导致|致使|使得|从而|因而|进而|引起|造成|促使|归因于|"
+    r"机理|机制|反应|作用机制|之所以|原因在于|"
+    r"because|due to|leads? to|result(?:s|ed)? in|cause[sd]?|owing to|mechanism)",
+    re.I,
+)
+
+
+def _covered_facet(facet_id: str, covered: List[str]) -> bool:
+    """facet 是否已被判定覆盖 (covered 来自 policy 的 covered 维度, 做双向包含匹配)。"""
+    fid = facet_id.lower()
+    return any(fid in c.lower() or c.lower() in fid for c in covered if c)
+
 
 def evaluate_guards(
-    skill: ResearchSkill, *, doc_count: int, evidence_texts: List[str],
+    skill: ResearchSkill,
+    *,
+    doc_count: int,
+    evidence_texts: List[str],
+    facet_ids: Optional[List[str]] = None,
+    covered: Optional[List[str]] = None,
 ) -> List[str]:
-    """返回当前未满足的守卫项 (人类可读)。空 = 守卫均满足/无可判定守卫。"""
+    """返回当前未满足的守卫项 (人类可读)。空 = 守卫均满足/无可判定守卫。
+
+    facet_ids / covered 供 per_object_evidence 判定"每个规划维度都已获证据覆盖"。
+    """
+    facet_ids = facet_ids or []
+    covered = covered or []
     unmet: List[str] = []
     for g in skill.guards:
         if g == "min_docs":
@@ -424,7 +439,18 @@ def evaluate_guards(
         elif g == "need_quantitative":
             if not any(_NUM_UNIT_RE.search(t or "") for t in evidence_texts):
                 unmet.append("尚未检索到定量数据 (数值+单位), 需定向补充")
-        # per_object_evidence / causal_chain_evidence: 语义守卫, 由 policy.md 提示词引导
+        elif g == "per_object_evidence":
+            # 对称覆盖: 规划出的每个维度 (对比任务里 = 每个被比较对象) 都应有证据
+            missing = [f for f in facet_ids if not _covered_facet(f, covered)]
+            if missing:
+                unmet.append(
+                    "以下规划维度尚未获得证据覆盖 (对比需对称覆盖各对象再收口): "
+                    + ", ".join(missing[:6])
+                )
+        elif g == "causal_chain_evidence":
+            # 因果链: 证据需含原因/过程/机理语句, 而非纯现象描述
+            if evidence_texts and not any(_CAUSAL_RE.search(t or "") for t in evidence_texts):
+                unmet.append("证据偏现象描述, 尚缺因果/机理链条 (原因→过程→结果) 证据, 需定向补充")
     return unmet
 
 
@@ -467,12 +493,13 @@ def resolve_skills_config(skills_cfg: Optional[Dict[str, Any]]) -> Dict[str, Any
         "enabled": bool(cfg.get("enabled", False)),
         "dirs": dirs,
         "upload_dir": upload_dir,
-        "router_mode": str(router.get("mode", "hybrid")),
+        # off=始终通用 | llm(默认)=思考模型按自描述判断 (已无触发词关键字匹配)
+        "router_mode": str(router.get("mode", "llm")),
         "router_max_tokens": int(router.get("max_tokens", 512)),
-        # 选 skill 走"思考模型": 默认开思考 (disable_thinking=False)
-        "router_disable_thinking": bool(router.get("disable_thinking", False)),
+        # 默认关思考: 开思考时 vLLM 把内容放 reasoning 通道, answer 常为空导致路由恒 none。
+        # 关思考后模型直接输出 JSON(含 reason 作为判定思路)。
+        "router_disable_thinking": bool(router.get("disable_thinking", True)),
         "router_min_confidence": float(router.get("min_confidence", DEFAULT_MIN_CONFIDENCE)),
-        "router_strong_min_hits": int(router.get("strong_min_hits", DEFAULT_STRONG_MIN_HITS)),
     }
 
 
@@ -519,9 +546,6 @@ def write_skill(upload_dir: str, spec: Dict[str, Any]) -> str:
     meta: Dict[str, Any] = {"id": sid, "name": str(spec["name"]).strip()}
     if spec.get("priority") is not None:
         meta["priority"] = int(spec["priority"])
-    triggers = [str(t).strip() for t in (spec.get("triggers") or []) if str(t).strip()]
-    if triggers:
-        meta["triggers"] = triggers
     suff = {k: v for k, v in (spec.get("sufficiency") or {}).items() if v not in (None, "", [])}
     if suff:
         meta["sufficiency"] = suff
@@ -536,7 +560,22 @@ def write_skill(upload_dir: str, spec: Dict[str, Any]) -> str:
         meta["guards"] = guards
 
     description = str(spec.get("description") or "").strip()
-    skill_md = _dump_frontmatter(meta) + "\n## Description\n\n" + (description or sid) + "\n"
+    when_to_use = str(spec.get("when_to_use") or "").strip()
+    when_not_to_use = str(spec.get("when_not_to_use") or "").strip()
+    examples = [str(e).strip() for e in (spec.get("examples") or []) if str(e).strip()]
+    anti_examples = [str(e).strip() for e in (spec.get("anti_examples") or []) if str(e).strip()]
+
+    parts: List[str] = [_dump_frontmatter(meta).rstrip()]
+    parts.append("## Description\n\n" + (description or sid))
+    if when_to_use:
+        parts.append("## When to use\n\n" + when_to_use)
+    if when_not_to_use:
+        parts.append("## When not to use\n\n" + when_not_to_use)
+    if examples:
+        parts.append("## Examples\n\n" + "\n".join(f"- {e}" for e in examples))
+    if anti_examples:
+        parts.append("## Anti-examples\n\n" + "\n".join(f"- {e}" for e in anti_examples))
+    skill_md = "\n\n".join(parts) + "\n"
     with open(os.path.join(d, "SKILL.md"), "w", encoding="utf-8") as f:
         f.write(skill_md)
     with open(os.path.join(d, "plan.md"), "w", encoding="utf-8") as f:
@@ -592,7 +631,10 @@ def skill_to_summary(skill: ResearchSkill, *, upload_dir: str) -> Dict[str, Any]
         "name": skill.name,
         "description": skill.description,
         "priority": skill.priority,
-        "triggers": skill.triggers,
+        "when_to_use": skill.when_to_use,
+        "when_not_to_use": skill.when_not_to_use,
+        "examples": skill.examples,
+        "anti_examples": skill.anti_examples,
         "sufficiency": skill.default_sufficiency,
         "prefer_first_paths": skill.prefer_first_paths,
         "tuning": {
@@ -619,12 +661,18 @@ def skill_template() -> Dict[str, Any]:
              "help": "小写字母开头, 仅含小写字母/数字/下划线 (如 quantitative_extraction)"},
             {"key": "name", "label": "技能名称", "type": "text", "required": True,
              "help": "中文展示名 (如 定量数据抽取)"},
-            {"key": "description", "label": "适用场景说明", "type": "textarea", "required": False,
-             "help": "什么样的用户发话该用这个技能 — 给分类器判断用"},
+            {"key": "description", "label": "一句话说明", "type": "textarea", "required": False,
+             "help": "这个技能在做什么 — 一句话概述"},
             {"key": "priority", "label": "优先级", "type": "number", "required": False,
-             "help": "多个技能触发词同时命中时, 数值大者优先 (默认 50)"},
-            {"key": "triggers", "label": "触发词", "type": "list", "required": False,
-             "help": "命中用户发话即倾向选该技能; 支持正则。每行一个"},
+             "help": "极少数模型判定平手时数值大者优先 (默认 50)"},
+            {"key": "when_to_use", "label": "适用场景", "type": "textarea", "required": False,
+             "help": "什么样的提问该用这个技能 — 分类模型据此判断 (越具体越准)"},
+            {"key": "when_not_to_use", "label": "不适用场景", "type": "textarea", "required": False,
+             "help": "哪些易混的提问不该用这个技能 (与相邻技能划清边界)"},
+            {"key": "examples", "label": "正例", "type": "list", "required": False,
+             "help": "应命中本技能的代表性问题, 每行一个"},
+            {"key": "anti_examples", "label": "反例", "type": "list", "required": False,
+             "help": "看似相关但不该命中的问题 (说明该归哪类), 每行一个"},
             {"key": "sufficiency", "label": "收口标准", "type": "sufficiency", "required": False,
              "help": "min_docs(至少文献数) / need_conflict_check / need_quantitative_data"},
             {"key": "tuning", "label": "调参", "type": "tuning", "required": False,
@@ -647,9 +695,18 @@ def skill_template() -> Dict[str, Any]:
         "example": {
             "id": "quantitative_extraction",
             "name": "定量数据抽取",
-            "description": "当用户需要具体数值/速率/含量/电化学参数等定量证据时使用。",
+            "description": "从文献中抽取具体数值/速率/含量/电化学参数等定量证据。",
             "priority": 58,
-            "triggers": ["数值", "多少", "速率", "含量", "参数", "定量"],
+            "when_to_use": "用户要的是带数值与单位的硬证据 (具体多少、速率、含量、电化学参数), 而非定性结论。",
+            "when_not_to_use": "用户只想要机理解释、定性对比或研究综述, 不强调拿到具体数值。",
+            "examples": [
+                "锌铝镁镀层在中性盐雾下的腐蚀速率是多少",
+                "这几篇文献里 Mg 含量的范围是多少",
+            ],
+            "anti_examples": [
+                "锌铝镁的耐蚀机理是什么 (→ 机理分析)",
+                "综述一下锌铝镁的研究现状 (→ 文献综述)",
+            ],
             "sufficiency": {"min_docs": 2, "need_quantitative_data": True},
             "tuning": {"max_rounds": 5},
             "guards": ["need_quantitative"],

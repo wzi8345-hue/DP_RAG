@@ -192,7 +192,10 @@ class SkillSpec(BaseModel):
     name: str
     description: str = ""
     priority: Optional[int] = 50
-    triggers: List[str] = []
+    when_to_use: str = ""
+    when_not_to_use: str = ""
+    examples: List[str] = []
+    anti_examples: List[str] = []
     prefer_first_paths: List[str] = []
     sufficiency: Dict[str, Any] = {}
     tuning: Dict[str, Any] = {}
@@ -210,7 +213,10 @@ class SkillSummary(BaseModel):
     name: str
     description: str = ""
     priority: int = 0
-    triggers: List[str] = []
+    when_to_use: str = ""
+    when_not_to_use: str = ""
+    examples: List[str] = []
+    anti_examples: List[str] = []
     prefer_first_paths: List[str] = []
     sufficiency: Dict[str, Any] = {}
     tuning: Dict[str, Any] = {}

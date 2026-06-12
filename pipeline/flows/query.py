@@ -971,7 +971,6 @@ class QueryFlow:
         skill_router_max_tokens = sk["router_max_tokens"]
         skill_router_disable_thinking = sk["router_disable_thinking"]
         skill_router_min_confidence = sk["router_min_confidence"]
-        skill_router_strong_min_hits = sk["router_strong_min_hits"]
         if sk["enabled"]:
             loaded_skills = load_skills(sk["dirs"])
             skill_router_mode = sk["router_mode"]
@@ -1009,7 +1008,6 @@ class QueryFlow:
             skill_router_max_tokens=skill_router_max_tokens,
             skill_router_disable_thinking=skill_router_disable_thinking,
             skill_router_min_confidence=skill_router_min_confidence,
-            skill_router_strong_min_hits=skill_router_strong_min_hits,
         )
         logger.info(
             f"[research] ResearchAgent 就绪: max_rounds={prof_cfg.get('max_rounds', 4)} "

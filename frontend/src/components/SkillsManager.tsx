@@ -12,7 +12,10 @@ interface FormState {
   name: string;
   description: string;
   priority: string;
-  triggers: string; // 每行一个
+  when_to_use: string;
+  when_not_to_use: string;
+  examples: string; // 每行一个
+  anti_examples: string; // 每行一个
   min_docs: string;
   need_conflict_check: boolean;
   need_quantitative_data: boolean;
@@ -32,7 +35,10 @@ const EMPTY: FormState = {
   name: "",
   description: "",
   priority: "50",
-  triggers: "",
+  when_to_use: "",
+  when_not_to_use: "",
+  examples: "",
+  anti_examples: "",
   min_docs: "",
   need_conflict_check: false,
   need_quantitative_data: false,
@@ -55,7 +61,10 @@ function fromSpec(s: SkillSummary | SkillSpec, overrideId?: string): FormState {
     name: s.name + (overrideId ? " (副本)" : ""),
     description: s.description || "",
     priority: s.priority != null ? String(s.priority) : "50",
-    triggers: (s.triggers || []).join("\n"),
+    when_to_use: s.when_to_use || "",
+    when_not_to_use: s.when_not_to_use || "",
+    examples: (s.examples || []).join("\n"),
+    anti_examples: (s.anti_examples || []).join("\n"),
     min_docs: suff.min_docs != null ? String(suff.min_docs) : "",
     need_conflict_check: !!suff.need_conflict_check,
     need_quantitative_data: !!suff.need_quantitative_data,
@@ -86,7 +95,10 @@ function toSpec(f: FormState): SkillSpec {
     name: f.name.trim(),
     description: f.description.trim(),
     priority: num(f.priority),
-    triggers: f.triggers.split("\n").map((t) => t.trim()).filter(Boolean),
+    when_to_use: f.when_to_use.trim(),
+    when_not_to_use: f.when_not_to_use.trim(),
+    examples: f.examples.split("\n").map((t) => t.trim()).filter(Boolean),
+    anti_examples: f.anti_examples.split("\n").map((t) => t.trim()).filter(Boolean),
     sufficiency,
     tuning,
     guards: f.guards,
@@ -235,7 +247,7 @@ export function SkillsManager({ api }: { api: ApiClient }) {
         {/* 技能列表 */}
         <Section
           title="已加载技能"
-          desc="专家模式提问时，会根据触发词/语义自动选择最匹配的技能；选不到时回退通用逻辑。内置技能只读，可“复制为新技能”后修改。"
+          desc="专家模式提问时，分类模型会根据每个技能的「适用场景 + 正/反例」语义判断最匹配的技能；模棱两可时回退通用逻辑。内置技能只读，可“复制为新技能”后修改。"
         >
           {!data || data.skills.length === 0 ? (
             <div className="py-4 text-center text-sm text-slate-500">
@@ -271,12 +283,14 @@ export function SkillsManager({ api }: { api: ApiClient }) {
                         </span>
                         <span className="text-[11px] text-slate-500">优先级 {s.priority}</span>
                       </div>
-                      {s.description && (
-                        <p className="mt-1 line-clamp-2 text-xs text-slate-400">{s.description}</p>
+                      {(s.when_to_use || s.description) && (
+                        <p className="mt-1 line-clamp-2 text-xs text-slate-400">
+                          {s.when_to_use || s.description}
+                        </p>
                       )}
-                      {s.triggers && s.triggers.length > 0 && (
+                      {s.examples && s.examples.length > 0 && (
                         <div className="mt-1.5 flex flex-wrap gap-1">
-                          {s.triggers.slice(0, 8).map((t) => (
+                          {s.examples.slice(0, 4).map((t) => (
                             <span
                               key={t}
                               className="rounded bg-slate-800/80 px-1.5 py-0.5 text-[11px] text-slate-400"
@@ -363,32 +377,58 @@ export function SkillsManager({ api }: { api: ApiClient }) {
             </Field>
           </div>
 
-          <Field label="适用场景说明" help="什么样的提问该用这个技能 — 供分类器判断">
+          <Field label="一句话说明" help="这个技能在做什么 — 一句话概述">
             <textarea
-              className="input min-h-[60px]"
+              className="input min-h-[48px]"
               value={form.description}
               onChange={(e) => set("description", e.target.value)}
             />
           </Field>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Field label="优先级" help="触发词同时命中时数值大者优先（默认 50）">
-              <input
-                type="number"
-                className="input"
-                value={form.priority}
-                onChange={(e) => set("priority", e.target.value)}
+            <Field label="适用场景" help="什么样的提问该用这个技能 — 分类模型据此判断，越具体越准">
+              <textarea
+                className="input min-h-[72px]"
+                value={form.when_to_use}
+                onChange={(e) => set("when_to_use", e.target.value)}
               />
             </Field>
-            <Field label="触发词" help="命中即倾向选该技能，支持正则。每行一个">
+            <Field label="不适用场景" help="哪些易混的提问不该用这个技能（与相邻技能划清边界）">
               <textarea
-                className="input min-h-[60px] font-mono text-xs"
-                value={form.triggers}
-                placeholder={"数值\n含量\n速率"}
-                onChange={(e) => set("triggers", e.target.value)}
+                className="input min-h-[72px]"
+                value={form.when_not_to_use}
+                onChange={(e) => set("when_not_to_use", e.target.value)}
               />
             </Field>
           </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Field label="正例" help="应命中本技能的代表性问题，每行一个">
+              <textarea
+                className="input min-h-[72px] text-xs"
+                value={form.examples}
+                placeholder={"锌铝镁和纯锌镀层耐蚀性对比\nA 和 B 哪个更好"}
+                onChange={(e) => set("examples", e.target.value)}
+              />
+            </Field>
+            <Field label="反例" help="看似相关但不该命中的问题（注明该归哪类），每行一个">
+              <textarea
+                className="input min-h-[72px] text-xs"
+                value={form.anti_examples}
+                placeholder={"锌铝镁的耐蚀机理是什么 (→ 机理分析)"}
+                onChange={(e) => set("anti_examples", e.target.value)}
+              />
+            </Field>
+          </div>
+
+          <Field label="优先级" help="极少数模型判定平手时数值大者优先（默认 50）">
+            <input
+              type="number"
+              className="input md:w-40"
+              value={form.priority}
+              onChange={(e) => set("priority", e.target.value)}
+            />
+          </Field>
 
           <Field label="收口标准 (sufficiency)" help="达到即可结束检索">
             <div className="flex flex-wrap items-center gap-4">

@@ -1,0 +1,12 @@
+# 路由评测用例: 期望命中 / 不命中本技能
+skill: mechanism_analysis
+should_hit:
+  - 为什么加了稀土元素镀层就更耐腐蚀
+  - 致密锈层到底是怎么一步步长出来的
+  - 合金元素是通过什么作用影响自修复能力的
+  - 解释一下点蚀的形成原因
+should_miss:
+  - 锌铝镁和纯锌哪个更耐蚀                 # → comparison
+  - 梳理一下耐候钢的研究现状               # → literature_review
+  - 耐候钢防腐研究的发展历程               # → research_timeline
+  - 这篇文献报道的腐蚀速率是多少           # → 通用/定量

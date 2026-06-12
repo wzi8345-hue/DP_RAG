@@ -391,7 +391,6 @@ def _make_skill_router_node(
     router_max_tokens: int,
     disable_thinking: bool,
     min_confidence: float,
-    strong_min_hits: int,
     default_max_rounds: int,
 ) -> callable:
     """skill_router 节点: 用"思考模型"判断用户发话属于哪类任务; 仅在【强匹配】时启用对应
@@ -407,7 +406,7 @@ def _make_skill_router_node(
             skill_llm, query, skills,
             mode=mode, prev_skill_id=state.get("prev_skill_id"),
             router_max_tokens=router_max_tokens, disable_thinking=disable_thinking,
-            min_confidence=min_confidence, strong_min_hits=strong_min_hits,
+            min_confidence=min_confidence,
             correlation_id=cid,
         )
         skill = skills.get(sel.skill_id) if sel.skill_id else None
@@ -488,7 +487,9 @@ def _make_plan_node(
 
         # skill 专属规划提示词与默认收口标准 (无 skill 时为 None → plan_research 用通用逻辑)
         skill: Optional[ResearchSkill] = state.get("skill")
-        plan_system = compose_plan_system(skill.plan_system) if skill else None
+        plan_system = (
+            compose_plan_system(skill.plan_system, skill.prefer_first_paths) if skill else None
+        )
         default_suff = skill.default_sufficiency if skill else None
         eff_max_batches = (
             int(skill.max_batches) if skill and skill.max_batches else max_batches
@@ -708,6 +709,8 @@ def _make_research_policy_node(
             unmet = evaluate_guards(
                 skill, doc_count=doc_count,
                 evidence_texts=[(h.content or "") for h in evidence],
+                facet_ids=plan.facet_ids() if plan else [],
+                covered=state.get("research_covered") or [],
             )
             if unmet:
                 observation += (
@@ -1026,11 +1029,10 @@ def build_research_graph(
     gap_stall_limit: int = 2,
     skills: Optional[Dict[str, ResearchSkill]] = None,
     skill_router_llm: Optional[LLMClient] = None,
-    skill_router_mode: str = "hybrid",
+    skill_router_mode: str = "llm",
     skill_router_max_tokens: int = 512,
     skill_router_disable_thinking: bool = False,
     skill_router_min_confidence: float = 0.6,
-    skill_router_strong_min_hits: int = 2,
 ) -> Any:
     """构建专业研究模式的 LangGraph (CompiledStateGraph)。复用现有节点工厂。
 
@@ -1087,7 +1089,6 @@ def build_research_graph(
             router_max_tokens=skill_router_max_tokens,
             disable_thinking=skill_router_disable_thinking,
             min_confidence=skill_router_min_confidence,
-            strong_min_hits=skill_router_strong_min_hits,
             default_max_rounds=max_rounds,
         )
         graph.add_node("skill_router", skill_router_node)
@@ -1425,11 +1426,10 @@ def build_research_agent_from_pipeline(
     gap_stall_limit: int = 2,
     skills: Optional[Dict[str, ResearchSkill]] = None,
     skill_router_llm: Optional[LLMClient] = None,
-    skill_router_mode: str = "hybrid",
+    skill_router_mode: str = "llm",
     skill_router_max_tokens: int = 512,
     skill_router_disable_thinking: bool = False,
     skill_router_min_confidence: float = 0.6,
-    skill_router_strong_min_hits: int = 2,
 ) -> ResearchAgent:
     compiled = build_research_graph(
         pipeline,
@@ -1465,7 +1465,6 @@ def build_research_agent_from_pipeline(
         skill_router_max_tokens=skill_router_max_tokens,
         skill_router_disable_thinking=skill_router_disable_thinking,
         skill_router_min_confidence=skill_router_min_confidence,
-        skill_router_strong_min_hits=skill_router_strong_min_hits,
     )
     # 某些 skill 可能放大 max_rounds; 递归预算按最大轮次估算 (+ skill_router 节点余量)
     eff_max_rounds = max(

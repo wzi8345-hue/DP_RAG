@@ -1,0 +1,12 @@
+# 路由评测用例: 期望命中 / 不命中本技能
+skill: literature_review
+should_hit:
+  - 帮我系统梳理一下高熵合金的研究现状
+  - 钢铁防腐目前都有哪些技术路线
+  - 给我讲讲固态电池电解质这个领域的整体情况
+  - 锌铝镁镀层都有哪些研究方向和方法
+should_miss:
+  - 锌铝镁镀层的耐蚀性这些年是怎么演进的     # → research_timeline (强调时间线)
+  - 锌铝镁和热镀锌哪个耐蚀更好               # → comparison
+  - 致密锈层为什么能起到保护作用             # → mechanism_analysis
+  - 这个体系最近三年的发展趋势如何           # → research_timeline

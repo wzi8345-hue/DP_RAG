@@ -401,11 +401,12 @@ retrieval:
         upload_dir: uploads/skills      # 用户经 UI 上传/编辑的 skill 落盘目录 (自动并入 dirs, 同 id 覆盖内置)
         default: literature_review      # 预留: 兜底 skill (当前未命中=None, 不强制套用)
         router:
-          mode: hybrid                  # off=不选 | heuristic=仅触发词强命中 | llm=仅思考模型 | hybrid=思考模型为主+触发词强命中兜底
-          disable_thinking: false       # 选 skill 走"思考模型": 开思考, 让其推理后再判定 (会展示判定思路)
-          max_tokens: 512               # 含思考过程, 预算放宽
-          min_confidence: 0.6           # 思考模型"强匹配"置信度下限; 低于此 → 回退通用逻辑
-          strong_min_hits: 2            # 触发词"强命中"所需的最少命中数 (单个关键词不算强匹配)
+          mode: llm                     # off=始终通用 | llm=分类模型按各技能「适用/正反例」自描述判断 (已无触发词关键字匹配)
+          # 关键: vLLM 思考模型开思考时 content 走 reasoning 通道, answer 常为空 → 路由恒判 none。
+          # 故默认关思考: 模型直接输出 JSON, 其中 reason 字段即"判定思路"用于展示。
+          disable_thinking: true
+          max_tokens: 512               # 关思考后输出仅一行 JSON, 预算充裕
+          min_confidence: 0.6           # 分类模型"强匹配"置信度下限; 低于此 → 回退通用逻辑
 
     # ── 反思 LLM (legacy + FC 通用) ──────────────────────────────────────
     reflection:

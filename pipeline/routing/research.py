@@ -149,11 +149,37 @@ _PLAN_SYSTEM = _PLAN_GATING_PREAMBLE + _PLAN_DECOMP_GENERIC + _PLAN_FC_SUFFIX
 _POLICY_SYSTEM = _POLICY_PREAMBLE + _POLICY_JUDGEMENT_GENERIC + _POLICY_FC_SUFFIX
 
 
-def compose_plan_system(skill_decomp: Optional[str]) -> str:
-    """用 skill 的拆解段组合规划 system; skill_decomp 为空则用通用拆解段。"""
+_PREFER_PATH_LABELS = {
+    "summary": "summary(综述/广搜)",
+    "progressive": "progressive(chunk 级正文深挖)",
+    "local": "local(指定文献内精读)",
+    "metadata": "metadata(结构化元数据)",
+}
+
+
+def _prefer_paths_hint(prefer_first_paths: Optional[List[str]]) -> str:
+    """把 skill 的 prefer_first_paths 渲染成首轮检索路径偏好提示 (仅引导, 不强制)。"""
+    paths = [p for p in (prefer_first_paths or []) if p in _PREFER_PATH_LABELS]
+    if not paths:
+        return ""
+    labels = "、".join(_PREFER_PATH_LABELS[p] for p in paths)
+    return (
+        f"首轮检索路径偏好: 优先在 initial_batches 中使用 {labels} 路径"
+        "(除非用户明确指向某篇具体文献或某个精确事实)。\n"
+    )
+
+
+def compose_plan_system(
+    skill_decomp: Optional[str],
+    prefer_first_paths: Optional[List[str]] = None,
+) -> str:
+    """用 skill 的拆解段组合规划 system; skill_decomp 为空则用通用拆解段。
+
+    prefer_first_paths 非空时追加首轮检索路径偏好提示 (来自 skill frontmatter)。
+    """
     body = (skill_decomp or "").strip()
     body = (body + "\n") if body else _PLAN_DECOMP_GENERIC
-    return _PLAN_GATING_PREAMBLE + body + _PLAN_FC_SUFFIX
+    return _PLAN_GATING_PREAMBLE + body + _prefer_paths_hint(prefer_first_paths) + _PLAN_FC_SUFFIX
 
 
 def compose_policy_system(skill_judgement: Optional[str]) -> str:
