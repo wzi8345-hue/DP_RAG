@@ -1184,11 +1184,13 @@ class IngestFlow:
             batch_size=cfg.get("batch_size", 100),
         )
 
-        stat = ingester.stats()
+        # 批量灌入时绝不在每篇后跑全表 stats() (会 O(N²) 扫全集合 + 抢共享盘 IO);
+        # 只取 O(1) 行数做进度日志。完整统计由 /stats 接口 (stats_only) 按需出。
+        row_count = ingester.row_count()
         logger.info(f"灌入完成: {result}")
-        logger.info(f"集合统计: {stat}")
+        logger.info(f"集合行数(估): {row_count}")
 
         return {
             "ingest_result": result,
-            "stats": stat,
+            "stats": {"total": row_count},
         }

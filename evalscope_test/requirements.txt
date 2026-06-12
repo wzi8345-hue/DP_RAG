@@ -1,0 +1,2 @@
+# evalscope 压测依赖 (含 perf 子模块的 aiohttp 等)
+evalscope[perf]>=1.8.0

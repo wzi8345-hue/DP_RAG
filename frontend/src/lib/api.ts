@@ -1,6 +1,7 @@
 import type {
   ChatRequest,
   ChatResponse,
+  ChunkBboxResponse,
   CollectionInfo,
   CollectionsListResponse,
   DocumentsListResponse,
@@ -19,6 +20,7 @@ import type {
   StreamEvent,
   TaskResponse,
 } from "./types";
+import { DEFAULT_COLLECTION } from "./types";
 import type { Settings } from "./settings";
 
 const API_PREFIX = "/api/v1";
@@ -76,6 +78,40 @@ export class ApiClient {
       { headers: headers(this.settings, false) }
     );
     return handle<DocSummaryResponse>(res);
+  }
+
+  // ── 原文 PDF + 定位框 (引用溯源高亮) ──────────────────────────────
+  /** 原始 PDF 的可取回 URL (供 pdf.js getDocument 加载)。 */
+  pdfUrl(collection: string, docId: string): string {
+    const c = collection || DEFAULT_COLLECTION;
+    return this.url(
+      `/files/pdf?collection=${encodeURIComponent(c)}&doc_id=${encodeURIComponent(docId)}`
+    );
+  }
+
+  /** pdf.js getDocument 需要的鉴权头 (未配置 apiKey 时为空)。 */
+  authHeaders(): Record<string, string> {
+    return this.settings.apiKey
+      ? { Authorization: `Bearer ${this.settings.apiKey}` }
+      : {};
+  }
+
+  /** 取某 chunk 在 PDF 中的定位框; 旧集合无 bboxes 字段时返回空列表。 */
+  async getChunkBbox(
+    collection: string,
+    docId: string,
+    chunkId: string
+  ): Promise<ChunkBboxResponse> {
+    const c = collection || DEFAULT_COLLECTION;
+    const res = await fetch(
+      this.url(
+        `/files/chunk_bbox?collection=${encodeURIComponent(c)}` +
+          `&doc_id=${encodeURIComponent(docId)}` +
+          `&chunk_id=${encodeURIComponent(chunkId)}`
+      ),
+      { headers: headers(this.settings, false) }
+    );
+    return handle<ChunkBboxResponse>(res);
   }
 
   async query(req: QueryRequest): Promise<QueryResponse> {

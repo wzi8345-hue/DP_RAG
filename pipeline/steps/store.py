@@ -69,11 +69,13 @@ class StoreStep(BaseStep):
             batch_size=cfg.get("batch_size", 100),
         )
 
-        stat = ingester.stats()
+        # 灌入后只取 O(1) 行数做日志, 不跑全表 stats() (批量时会 O(N²) + 抢 IO)。
+        # 需要完整统计走 stats_only 分支 (上面) / /stats 接口。
+        row_count = ingester.row_count()
         logger.info(f"灌入完成: {result}")
-        logger.info(f"集合统计: {stat}")
+        logger.info(f"集合行数(估): {row_count}")
 
         return StepResult(self.name, success=True, data={
             "ingest_result": result,
-            "stats": stat,
+            "stats": {"total": row_count},
         })

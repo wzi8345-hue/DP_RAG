@@ -5,16 +5,20 @@ export function HitCard({
   hit,
   num,
   highlight,
+  onOpenPdf,
 }: {
   hit: Hit;
   num: number;
   highlight?: boolean;
+  /** 点击「原文定位」: 在 PDF 中高亮该 chunk (需 doc_id + chunk_id) */
+  onOpenPdf?: (docId: string, chunkId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const score =
     hit.rerank_score ?? hit.rrf_score ?? hit.score ?? undefined;
   const text = hit.content || hit.context || "";
   const long = text.length > 280;
+  const canLocate = !!(onOpenPdf && hit.doc_id && hit.chunk_id);
 
   return (
     <div
@@ -62,14 +66,25 @@ export function HitCard({
         {text || <span className="italic text-slate-500">（无文本内容）</span>}
       </p>
 
-      {long && (
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-1 text-xs text-blue-400 hover:text-blue-300"
-        >
-          {expanded ? "收起" : "展开全文"}
-        </button>
-      )}
+      <div className="mt-1 flex items-center gap-3">
+        {long && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="text-xs text-blue-400 hover:text-blue-300"
+          >
+            {expanded ? "收起" : "展开全文"}
+          </button>
+        )}
+        {canLocate && (
+          <button
+            onClick={() => onOpenPdf!(hit.doc_id!, hit.chunk_id!)}
+            className="text-xs text-amber-400 hover:text-amber-300"
+            title="在原文 PDF 中定位高亮"
+          >
+            📄 原文定位
+          </button>
+        )}
+      </div>
 
       {hit.matched_keywords && hit.matched_keywords.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">

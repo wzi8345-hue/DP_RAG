@@ -35,7 +35,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 MINERU_RESULT = (
     Path(user_config.MINERU_RESULT_DIR)
     if user_config.MINERU_RESULT_DIR
-    else PROJECT_ROOT / "mineru_result"
+    else PROJECT_ROOT / "uploads/kb_v2_b8db35a2"
 )
 MAX_QA_PER_DOC = 5
 

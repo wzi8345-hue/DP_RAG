@@ -137,6 +137,22 @@ def _block_text(b: Dict[str, Any]) -> str:
     return ""
 
 
+def _block_bbox(b: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """从 UniParser block 取归一化定位框, 形成 ``{"page": p, "bbox": [x1,y1,x2,y2]}``。
+
+    bbox 坐标是页内归一化值 (0~1, 原点左上)。block 缺 bbox 或坐标非法时返回 None,
+    调用方据此跳过 (例如 LLM 合成的 summary 没有源 block, bbox 为空)。
+    """
+    bb = b.get("bbox")
+    if not isinstance(bb, dict):
+        return None
+    try:
+        coords = [float(bb["x1"]), float(bb["y1"]), float(bb["x2"]), float(bb["y2"])]
+    except (KeyError, TypeError, ValueError):
+        return None
+    return {"page": int(b.get("page", 0)), "bbox": coords}
+
+
 def _is_drop_block(b: Dict[str, Any], min_conf: float) -> bool:
     """判断是否丢弃这个 block (NOISE / hidden / 低置信)。"""
     if not isinstance(b, dict):
@@ -297,6 +313,7 @@ def _equation_caption_for(
 
 def _build_paragraph_chunk(
     text: str, section: str, page: int, paragraph_index: int,
+    bboxes: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
     if not text or not text.strip():
         return None
@@ -309,11 +326,13 @@ def _build_paragraph_chunk(
         "context": "",
         "related_assets": [],
         "paragraph_index": paragraph_index,
+        "bboxes": bboxes or [],
     }
 
 
 def _build_equation_chunk(
     latex: str, section: str, page: int, eq_label: str = "",
+    bboxes: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """latex 已剥过 $$ 时自动包一层, 已带 $$ 不重复。"""
     if not latex or not latex.strip():
@@ -331,6 +350,7 @@ def _build_equation_chunk(
         "context": "",
         "related_assets": [],
         "paragraph_index": -1,
+        "bboxes": bboxes or [],
     }
 
 
@@ -345,6 +365,7 @@ def _build_table_chunk(
     lines.append(f"[Caption] {caption}" if caption else "[Table without caption]")
     if structure:
         lines.append(f"[Table HTML]\n{structure}")
+    bb = _block_bbox(block)
     return {
         "id": _short_id("table"),
         "type": "table",
@@ -354,6 +375,7 @@ def _build_table_chunk(
         "context": "",
         "related_assets": [],
         "paragraph_index": -1,
+        "bboxes": [bb] if bb else [],
         "_label": label,
     }
 
@@ -373,6 +395,7 @@ def _build_image_chunk_from_caption(
     if not caption or len(caption) < 4:
         return None
     label = _extract_caption_label(caption, "image") or ""
+    bb = _block_bbox(caption_block)
     return {
         "id": _short_id("image"),
         "type": "image",
@@ -382,12 +405,14 @@ def _build_image_chunk_from_caption(
         "context": "",
         "related_assets": [],
         "paragraph_index": -1,
+        "bboxes": [bb] if bb else [],
         "_label": label,
     }
 
 
 def _build_doc_title_chunk(
     text: str, page: int = 0,
+    bboxes: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
     if not text or not text.strip():
         return None
@@ -400,6 +425,7 @@ def _build_doc_title_chunk(
         "context": "",
         "related_assets": [],
         "paragraph_index": -1,
+        "bboxes": bboxes or [],
     }
 
 
@@ -409,13 +435,13 @@ def _build_references_chunks_from_blocks(
     batch_size: int,
 ) -> List[Dict[str, Any]]:
     """把 UniParser 的 reference 类 block 按 batch 聚合为 references chunk。"""
-    entries: List[str] = []
+    entries: List[Tuple[str, Optional[Dict[str, Any]]]] = []
     pages_seen: set = set()
     for b in ref_blocks:
         txt = _block_text(b)
         if not txt:
             continue
-        entries.append(txt)
+        entries.append((txt, _block_bbox(b)))
         pages_seen.add(int(b.get("page", -1)))
     if not entries:
         return []
@@ -423,9 +449,10 @@ def _build_references_chunks_from_blocks(
     out: List[Dict[str, Any]] = []
     for i in range(0, len(entries), batch_size):
         batch = entries[i : i + batch_size]
-        content = "\n\n".join(batch).strip()
+        content = "\n\n".join(t for t, _ in batch).strip()
         if not content:
             continue
+        bboxes = [bb for _, bb in batch if bb]
         out.append({
             "id": _short_id("references"),
             "type": "references",
@@ -435,6 +462,7 @@ def _build_references_chunks_from_blocks(
             "context": "",
             "related_assets": [],
             "paragraph_index": -1,
+            "bboxes": bboxes,
             "ref_index_start": i + 1,
             "ref_index_end": i + len(batch),
             "ref_count": len(batch),
@@ -635,19 +663,23 @@ def build_knowledge_blocks_uniparser(
     # 注入文献 title chunk: 优先用 UniParser 解析出的真实标题 (documenttitle),
     # 仅当其缺失/乱码时才回退到 doc_title 参数 (通常为 PDF 文件名去后缀)。
     documenttitle_text = ""
+    documenttitle_bbox: Optional[Dict[str, Any]] = None
     for b in all_blocks:
         if b.get("type") == DOC_TITLE_TYPE:
             documenttitle_text = _block_text(b) or documenttitle_text
             if documenttitle_text:
+                documenttitle_bbox = _block_bbox(b)
                 break
     documenttitle_text = (documenttitle_text or "").strip()
     fallback_title = (doc_title or "").strip()
     if documenttitle_text and not is_garbled_text(documenttitle_text):
         title_text = documenttitle_text
+        title_bboxes = [documenttitle_bbox] if documenttitle_bbox else []
     else:
         title_text = fallback_title
+        title_bboxes = []  # fallback 标题来自文件名, 无源 block 定位框
     if title_text and not is_garbled_text(title_text):
-        title_chunk = _build_doc_title_chunk(title_text, page=0)
+        title_chunk = _build_doc_title_chunk(title_text, page=0, bboxes=title_bboxes)
         if title_chunk:
             chunks.append(title_chunk)
 
@@ -680,9 +712,10 @@ def build_knowledge_blocks_uniparser(
     # 摘要 section 内所有 paragraph 累积起来, 整段合成单个 summary chunk (避免被段落切碎)
     pending_summary_texts: List[str] = []
     pending_summary_pages: set = set()
+    pending_summary_bboxes: List[Dict[str, Any]] = []
 
     def _flush_pending_summary() -> None:
-        nonlocal pending_summary_texts, pending_summary_pages
+        nonlocal pending_summary_texts, pending_summary_pages, pending_summary_bboxes
         if not pending_summary_texts:
             return
         content = "\n\n".join(t for t in pending_summary_texts if t.strip()).strip()
@@ -697,9 +730,11 @@ def build_knowledge_blocks_uniparser(
                 "context": "",
                 "related_assets": [],
                 "paragraph_index": _next_para_idx(),
+                "bboxes": list(pending_summary_bboxes),
             })
         pending_summary_texts = []
         pending_summary_pages = set()
+        pending_summary_bboxes = []
 
     def _flush_pending_paragraphs() -> None:
         """把缓冲的连续 paragraph 块按 MinerU 逻辑段落分组后成 text chunk。
@@ -721,10 +756,13 @@ def build_knowledge_blocks_uniparser(
             txt = _block_text(pb)
             if not txt:
                 continue
+            # _bbox 挂在 item 上, 经 _group_logical_paragraphs 分组后仍随 item 保留
+            # (分组函数只增删/重排 item, 不重建), 之后按组聚合还原本段的所有源框。
             mineru_items.append({
                 "type": "paragraph",
                 "content": {"paragraph_content": [{"type": "text", "content": txt}]},
                 "_page": int(pb.get("page", 0)),
+                "_bbox": _block_bbox(pb),
             })
         if not mineru_items:
             return
@@ -736,9 +774,11 @@ def build_knowledge_blocks_uniparser(
                 continue
             pages_in_group = sorted({int(it.get("_page", 0)) for it in group})
             page = pages_in_group[0] if pages_in_group else 0
+            bboxes_in_group = [it["_bbox"] for it in group if it.get("_bbox")]
             para_idx = -1 if is_preamble else _next_para_idx()
             base = _build_paragraph_chunk(
                 combined, section=cur_section, page=page, paragraph_index=para_idx,
+                bboxes=bboxes_in_group,
             )
             if not base:
                 continue
@@ -808,6 +848,9 @@ def build_knowledge_blocks_uniparser(
             if txt and not _is_metadata_line(txt):
                 pending_summary_texts.append(txt)
                 pending_summary_pages.add(int(b.get("page", 0)))
+                bb = _block_bbox(b)
+                if bb:
+                    pending_summary_bboxes.append(bb)
             continue
 
         # —— equation 块 -> equation chunk ——
@@ -818,10 +861,12 @@ def build_knowledge_blocks_uniparser(
             if not latex:
                 continue
             eq_label_text = _equation_caption_for(b, idx, all_blocks)
+            eq_bb = _block_bbox(b)
             ec = _build_equation_chunk(
                 latex, section=cur_section,
                 page=int(b.get("page", 0)),
                 eq_label=eq_label_text,
+                bboxes=[eq_bb] if eq_bb else [],
             )
             if ec:
                 chunks.append(ec)
@@ -944,6 +989,7 @@ def build_knowledge_blocks_uniparser(
                 "context": "",
                 "related_assets": [],
                 "paragraph_index": 0,
+                "bboxes": [],  # LLM 合成摘要无源 block, 没有定位框
             }
             insert_at = 0
             for i, c in enumerate(chunks):

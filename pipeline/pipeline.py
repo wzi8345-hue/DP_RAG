@@ -644,6 +644,21 @@ class Pipeline:
         except Exception as e:
             logger.warning(f"[pipeline] flush 集合失败 {name}: {e}")
 
+    def collection_row_count(self, name: str, timeout: float = 10.0) -> int:
+        """带超时的轻量健康探测: 返回集合行数 (O(1), 不扫全表)。
+
+        批量灌入的"批间健康闸门"用它判断 Milvus 是否还活着: 若 Milvus 卡在
+        共享盘 IO 上, get_collection_stats 会在 timeout 后抛错 (而非无限期挂住),
+        调用方据此退避, 避免继续往一个卡死的 Milvus 灌入。
+
+        集合不存在返回 0; Milvus 无响应则抛异常 (由调用方捕获判定为不健康)。
+        """
+        with self._admin_milvus_client() as client:
+            if not client.has_collection(name, timeout=timeout):
+                return 0
+            info = client.get_collection_stats(name, timeout=timeout)
+            return int(info.get("row_count", 0) or 0)
+
     def list_doc_ids(self, collection: str) -> set:
         """返回某集合中已入库的全部 doc_id (集合不存在时返回空集)。
 
@@ -753,6 +768,58 @@ class Pipeline:
             if not info["doc_name"]:
                 info["doc_name"] = info["doc_id"]
         return sorted(docs.values(), key=lambda x: str(x["doc_name"]).lower())
+
+    def get_chunk_bboxes(
+        self, collection: str, doc_id: str, chunk_id: str,
+    ) -> Dict[str, Any]:
+        """按 (doc_id, chunk_id) 取该 chunk 在原 PDF 中的定位框。
+
+        用于前端"点击角标 → 在 PDF 上高亮该 chunk"。bboxes 形如
+        ``[{"page": int, "bbox": [x1,y1,x2,y2]}]`` (页内归一化 0~1, 原点左上,
+        page 为 0-based)。
+
+        向后兼容: 旧集合 (v5 及之前) 没有 ``bboxes`` 字段, 此时只查 page_start,
+        返回空 bboxes (前端据此只跳页不画框, 不报错)。集合/chunk 不存在时
+        ``found=False``。
+        """
+        pk = f"{doc_id}::{chunk_id}"
+        # Milvus 表达式里的双引号/反斜杠需转义
+        pk_expr = pk.replace("\\", "\\\\").replace('"', '\\"')
+        result: Dict[str, Any] = {"bboxes": [], "page_start": None, "found": False}
+        with self._admin_milvus_client() as client:
+            if not client.has_collection(collection):
+                return result
+            has_bboxes = False
+            try:
+                desc = client.describe_collection(collection)
+                field_names = {f.get("name") for f in (desc.get("fields") or [])}
+                has_bboxes = "bboxes" in field_names
+            except Exception as e:
+                logger.debug(f"[pipeline] describe_collection({collection}) 失败: {e}")
+            out_fields = ["chunk_id", "page_start"]
+            if has_bboxes:
+                out_fields.append("bboxes")
+            try:
+                rows = client.query(
+                    collection_name=collection,
+                    filter=f'pk == "{pk_expr}"',
+                    output_fields=out_fields,
+                    limit=1,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[pipeline] get_chunk_bboxes 查询失败 {collection} pk={pk}: {e}"
+                )
+                return result
+            if not rows:
+                return result
+            row = rows[0]
+            bboxes = row.get("bboxes")
+            result["bboxes"] = bboxes if isinstance(bboxes, list) else []
+            ps = row.get("page_start")
+            result["page_start"] = int(ps) if isinstance(ps, int) else ps
+            result["found"] = True
+        return result
 
     # ── 便利方法 ──────────────────────────────────────────────────────
 

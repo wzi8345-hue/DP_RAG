@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from ..deps import get_pipeline, get_task_store, verify_api_key
 from ..models import IngestRequest, ParseRequest, LoadVecRequest, TaskResponse
-from ...flows.ingest import IngestFlow, IngestResult
+from ...flows.ingest import IngestFlow, IngestResult, IngestStepSummary
 from .collections import (
     _kb_meta_path,
     _write_kb_meta,
@@ -33,6 +33,35 @@ router = APIRouter()
 # 阈值留有余量 (>前端批大小), 可用环境变量覆盖; 超限返回 413 而非等它崩。
 _UPLOAD_MAX_FILES = int(os.environ.get("UPLOAD_MAX_FILES", "200"))
 _UPLOAD_MAX_TOTAL_MB = int(os.environ.get("UPLOAD_MAX_TOTAL_MB", "500"))
+
+# 批间健康闸门 (大批量灌入防 Milvus 被压垮 / 卡死):
+# 每灌 _INGEST_GATE_BATCH 篇就 flush 一次并探测 Milvus 健康; 不健康则退避重试,
+# 持续不健康 (超过 retries) 就停止继续灌入, 剩余文档标记为中断 (稍后重传会续灌)。
+# 这样即便底层共享盘 IO 抖动, 也不会"一直喂到 Milvus 卡死 (需重启开发机)"。
+_INGEST_GATE_BATCH = int(os.environ.get("INGEST_GATE_BATCH", "50"))
+_INGEST_HEALTH_TIMEOUT_S = float(os.environ.get("INGEST_HEALTH_TIMEOUT_S", "10"))
+_INGEST_HEALTH_RETRIES = int(os.environ.get("INGEST_HEALTH_RETRIES", "5"))
+_INGEST_HEALTH_BACKOFF_S = float(os.environ.get("INGEST_HEALTH_BACKOFF_S", "15"))
+
+
+def _wait_until_milvus_healthy(pipe: Any, collection: str) -> bool:
+    """批间健康闸门: 带超时探测 Milvus, 不健康则退避重试。
+
+    返回 True 表示 Milvus 可用 (可继续灌入); 连续 _INGEST_HEALTH_RETRIES 次
+    探测都失败 (含超时) 则返回 False, 调用方据此停止继续灌入。
+    """
+    for attempt in range(1, _INGEST_HEALTH_RETRIES + 1):
+        try:
+            rc = pipe.collection_row_count(collection, timeout=_INGEST_HEALTH_TIMEOUT_S)
+            if rc >= 0:
+                return True
+        except Exception as e:
+            logger.warning(
+                f"[ingest-upload] Milvus 健康探测失败 "
+                f"(第 {attempt}/{_INGEST_HEALTH_RETRIES} 次): {e}"
+            )
+        _time_mod.sleep(_INGEST_HEALTH_BACKOFF_S)
+    return False
 
 
 class _SlidingWindowRateLimiter:
@@ -370,25 +399,54 @@ def _ingest_upload(
                 task_id, done_count["n"], total, os.path.basename(doc_dir)
             )
 
-    if concurrency <= 1:
-        for idx, (fp, doc_dir) in enumerate(items):
-            _work(idx, fp, doc_dir)
-    else:
+    def _run_subbatch(sub: List[tuple]) -> None:
+        """灌入一个子批 (sub: [(idx, fp, doc_dir)])，并发上限不变。"""
+        if concurrency <= 1:
+            for idx, fp, doc_dir in sub:
+                _work(idx, fp, doc_dir)
+            return
         with ThreadPoolExecutor(
             max_workers=concurrency, thread_name_prefix="ingest-upload"
         ) as ex:
-            futures = [
-                ex.submit(_work, idx, fp, doc_dir)
-                for idx, (fp, doc_dir) in enumerate(items)
-            ]
+            futures = [ex.submit(_work, idx, fp, doc_dir) for idx, fp, doc_dir in sub]
             for fut in futures:
                 fut.result()  # 等待全部完成 (异常已在 _work 内捕获)
 
-    # flush 一次, 让列表 row_count 立即反映新灌入的数据
-    try:
-        pipe.flush_collection(collection)
-    except Exception as e:
-        logger.warning(f"[ingest-upload] flush 失败 {collection}: {e}")
+    # 分子批灌入: 每批后 flush + 健康闸门, 持续不健康则停止 (剩余标记中断)。
+    indexed = [(idx, fp, doc_dir) for idx, (fp, doc_dir) in enumerate(items)]
+    gate = max(1, _INGEST_GATE_BATCH)
+    interrupted = False
+    for start in range(0, total, gate):
+        sub = indexed[start: start + gate]
+        _run_subbatch(sub)
+        # flush 让 row_count 立即反映新数据, 同时作为写入屏障 (让段封存先落定)
+        try:
+            pipe.flush_collection(collection)
+        except Exception as e:
+            logger.warning(f"[ingest-upload] flush 失败 {collection}: {e}")
+        # 最后一批之后无需再 gate; 之前的每批后探测 Milvus 是否还健康
+        if start + gate < total:
+            if not _wait_until_milvus_healthy(pipe, collection):
+                interrupted = True
+                logger.error(
+                    f"[ingest-upload] Milvus 持续不健康, 已停止继续灌入 "
+                    f"(已处理 {start + len(sub)}/{total} 篇); 剩余文档标记为中断, "
+                    f"稍后重传会自动续灌 (按 doc_id 跳过已入库)。"
+                )
+                break
+
+    # 被背压中断而未处理的文档: 填占位结果, 让前端看到"中断未灌入"而非崩溃
+    if interrupted:
+        for idx in range(total):
+            if results[idx] is None:
+                fp = items[idx][0]
+                results[idx] = IngestResult(
+                    file_paths=[fp],
+                    steps=[IngestStepSummary(
+                        step="store", success=False, elapsed=0.0,
+                        error="Milvus 写入背压: 已暂停灌入, 该文献未入库 (稍后重传会自动续灌)",
+                    )],
+                )
 
     # 文档展示名: 优先用解析出的 doc_id; 解析早期失败 (如 429) 时 doc_id 为空,
     # 回退到上传时的文档目录名 (= 文件名 stem), 保证失败项也能显示具体是哪篇。
@@ -419,6 +477,7 @@ def _ingest_upload(
         "files": total,
         "success": success,
         "failed": failed,
+        "interrupted": interrupted,
         "skipped_existing": len(skipped_existing),
         "skipped_files": skipped_existing,
         "stored_chunks": stored_chunks,

@@ -11,7 +11,7 @@ MINERU_RESULT_DIR = None
 
 # ---------- 生成选项 ----------
 # 全量 mineru 切块文献 → test_dataset_all.json; 仅检索库子集 → test_dataset_corpus33.json
-OUTPUT_FILE = "test_dataset_all.json"
+OUTPUT_FILE = "test_dataset_首钢文献.json"
 SKIP_DIRS = ["测试", "测试2"]
 DOC_FILTER = None  # 只处理目录名包含该关键词的文献，None 表示全部
 CONTINUE_FROM = None  # 续跑：已有结果文件名，如 "test_dataset.json"

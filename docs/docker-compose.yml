@@ -18,16 +18,30 @@
 #   docker compose -f docker-compose.yml up -d        # V2
 #   docker-compose -f docker-compose.yml up -d          # V1 (带连字符)
 
-version: "3.8"
-
 x-vllm-logging: &vllm-logging
   driver: json-file
   options:
     max-size: "50m"
     max-file: "3"
 
+# 三个 vllm-* 服务共用同一镜像与 GPU/日志/重启配置, 用锚点复用一份。
+# pull_policy: missing —— 镜像本地已存在就不再拉取, 避免对同一镜像重复 pull。
+x-vllm-base: &vllm-base
+  image: vllm/vllm-openai:latest
+  pull_policy: missing
+  logging: *vllm-logging
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+  restart: unless-stopped
+
 services:
   # ── Milvus 向量库 (单机版, 内嵌 etcd) ──────────────────────────
+  # 纯 CPU 运行: 不引用 x-vllm-base 锚点, 无任何 GPU 预留 (standalone 镜像本就不用 GPU)。
   milvus-standalone:
     image: milvusdb/milvus:v2.5.4
     container_name: milvus-standalone
@@ -47,12 +61,10 @@ services:
 
   # ── Embedding: Qwen3-Embedding-4B (端口 8002) ─────────────────
   vllm-embed:
-    image: vllm/vllm-openai:latest
+    <<: *vllm-base
     container_name: vllm-embed
-    gpus: all
     ports:
       - "8002:8002"
-    logging: *vllm-logging
     volumes:
       - ./Qwen3-Embedding-4B:/Qwen3-Embedding-4B:ro
     command:
@@ -68,16 +80,24 @@ services:
       - "0.25"
       - --max-model-len
       - "9216"
-    restart: unless-stopped
+    # /health 仅在模型完全加载就绪后才返 200; 作为顺序启动的"就绪信号"。
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\""]
+      interval: 20s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
 
   # ── Reranker: Qwen3-Reranker-4B (端口 8001) ───────────────────
+  # 顺序启动: 等 vllm-embed 就绪 (healthy) 后再启, 避免三个模型同时加载挤爆显存。
   vllm-rerank:
-    image: vllm/vllm-openai:latest
+    <<: *vllm-base
     container_name: vllm-rerank
-    gpus: all
+    depends_on:
+      vllm-embed:
+        condition: service_healthy
     ports:
       - "8001:8001"
-    logging: *vllm-logging
     volumes:
       - ./Qwen3-Reranker-4B:/models/Qwen3-Reranker-4B:ro
     command:
@@ -95,16 +115,23 @@ services:
       - "10240"
       - --hf_overrides
       - '{"architectures": ["Qwen3ForSequenceClassification"], "classifier_from_token": ["no", "yes"], "is_original_qwen3_reranker": true}'
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
+      interval: 20s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
 
   # ── 生成 LLM: Qwen3.5-9B (端口 8000) ──────────────────────────
+  # 顺序启动: 等 vllm-rerank 就绪 (healthy) 后再启 (最后加载, 占显存最大 0.5)。
   vllm-llm:
-    image: vllm/vllm-openai:latest
+    <<: *vllm-base
     container_name: vllm-llm
-    gpus: all
+    depends_on:
+      vllm-rerank:
+        condition: service_healthy
     ports:
       - "8000:8000"
-    logging: *vllm-logging
     volumes:
       - ./Qwen3.5-9B:/models/Qwen3.5-9B:ro
     command:
@@ -127,12 +154,9 @@ services:
       - --enable-auto-tool-choice
       - --tool-call-parser
       - hermes
-    restart: unless-stopped
-
-  # ── Attu: Milvus 可视化 (端口 3000) ───────────────────────────
-  milvus-attu:
-    image: zilliz/attu:v2.5.10
-    container_name: milvus-attu
-    ports:
-      - "3000:3000"
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 20s
+      timeout: 10s
+      retries: 60
+      start_period: 60s

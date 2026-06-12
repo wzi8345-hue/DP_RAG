@@ -1163,6 +1163,36 @@ def _merge_short_paragraph_groups(
     return out
 
 
+def _v2_block_bbox(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """从 content_list_v2 的 item 取归一化定位框 ``{"page": p, "bbox": [x1,y1,x2,y2]}``。
+
+    MinerU content_list_v2 的 ``bbox`` 是按轴归一化到 0~1000 的整数坐标 (原点左上,
+    = model.json 的 0~1 归一化值 × 1000)。这里除以 1000 还原为 0~1, 与 UniParser
+    chunker 的 bbox 统一; 越界值钳到 [0, 1]。``page`` 取调用方在收集阶段挂上的
+    ``_page`` (content_list_v2 的页号是外层 list 下标, item 本身不带)。
+
+    item 缺 bbox 或坐标非法时返回 None (例如合成 chunk 没有源 item)。
+    """
+    bb = item.get("bbox")
+    if not isinstance(bb, (list, tuple)) or len(bb) != 4:
+        return None
+    try:
+        coords = [min(1.0, max(0.0, float(v) / 1000.0)) for v in bb]
+    except (TypeError, ValueError):
+        return None
+    return {"page": int(item.get("_page", 0)), "bbox": coords}
+
+
+def _collect_group_bboxes(group: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """聚合一个逻辑段落组内所有源 item 的归一化定位框 (跳过无 bbox 的)。"""
+    out: List[Dict[str, Any]] = []
+    for p in group:
+        bb = _v2_block_bbox(p)
+        if bb:
+            out.append(bb)
+    return out
+
+
 def _build_chunk_from_group(
     group: List[Dict[str, Any]],
     section: str,
@@ -1255,6 +1285,8 @@ def _build_chunk_from_group(
         # 这样 local 路径按 paragraph_index in [...] 召回时不会拿到公式,
         # 用户问 "第 12 段" 仍只命中真正的 text/summary.
         "paragraph_index": -1 if chunk_type == "equation" else paragraph_index,
+        # 本组所有源 item 的定位框 (合并段为 1:N; 后续语义切分的子块经 dict() 继承)
+        "bboxes": _collect_group_bboxes(group),
     }
 
 
@@ -1495,14 +1527,21 @@ def _build_references_chunks_from_entries(
     section: str,
     pages: List[int],
     batch_size: int = DEFAULT_REFERENCES_BATCH_SIZE,
+    bboxes: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
-    """把已提取的引用条目 batch 成 type=references chunk。"""
+    """把已提取的引用条目 batch 成 type=references chunk。
+
+    引用条目在抽取时已扁平为字符串, 丢失了 entry→源块的精确映射; 故 ``bboxes``
+    (本参考文献区累积的块级定位框) 整体挂到每个 references chunk 上 (块粒度,
+    非条目粒度)。无 bbox 时为空列表。
+    """
     if not entries:
         return []
 
     out: List[Dict[str, Any]] = []
     sorted_pages = sorted(set(pages))
     section_label = _normalize_section_title(section) or "References"
+    ref_bboxes = list(bboxes or [])
     for i in range(0, len(entries), batch_size):
         batch = entries[i : i + batch_size]
         content = "\n\n".join(batch).strip()
@@ -1517,6 +1556,7 @@ def _build_references_chunks_from_entries(
             "context": "",
             "related_assets": [],
             "paragraph_index": -1,
+            "bboxes": ref_bboxes,
             "ref_index_start": i + 1,
             "ref_index_end": i + len(batch),
             "ref_count": len(batch),
@@ -1648,6 +1688,8 @@ def _build_asset_chunk(
     """
     t = item.get("type")
     cd = item.get("content") or {}
+    item["_page"] = page_idx  # 供 _v2_block_bbox 取页号
+    bb = _v2_block_bbox(item)
     if t == "image":
         caption = _flatten_inline(cd.get("image_caption", []))
         footnote = _flatten_inline(cd.get("image_footnote", []))
@@ -1664,6 +1706,7 @@ def _build_asset_chunk(
             "content": "\n".join(lines),
             "context": footnote,
             "related_assets": [],
+            "bboxes": [bb] if bb else [],
             "_label": label,
         }
         if img_path:
@@ -1690,6 +1733,7 @@ def _build_asset_chunk(
             "content": "\n".join(lines),
             "context": footnote,
             "related_assets": [],
+            "bboxes": [bb] if bb else [],
             "_label": label,
         }
         if img_path:
@@ -1882,6 +1926,7 @@ def build_knowledge_blocks(
     pending_ref_entries: List[str] = []
     pending_ref_pages: List[int] = []
     pending_ref_section = ""
+    pending_ref_bboxes: List[Dict[str, Any]] = []  # 参考文献块的源定位框 (块粒度)
     # 文档内段落计数 (1-based, 仅在 text/summary chunk 上使用)
     paragraph_counter = [0]
 
@@ -1891,6 +1936,7 @@ def build_knowledge_blocks(
 
     def _flush_pending_references() -> None:
         nonlocal pending_ref_entries, pending_ref_pages, pending_ref_section
+        nonlocal pending_ref_bboxes
         if not pending_ref_entries:
             return
         ref_chunks = _build_references_chunks_from_entries(
@@ -1898,11 +1944,13 @@ def build_knowledge_blocks(
             section=pending_ref_section or cur_section or "References",
             pages=pending_ref_pages,
             batch_size=references_batch_size,
+            bboxes=pending_ref_bboxes,
         )
         chunks.extend(ref_chunks)
         pending_ref_entries = []
         pending_ref_pages = []
         pending_ref_section = ""
+        pending_ref_bboxes = []
 
     def _build_section_chunks(
         groups: List[List[Dict[str, Any]]],
@@ -1976,6 +2024,10 @@ def build_knowledge_blocks(
                 for p in cur_pages:
                     if p not in pending_ref_pages:
                         pending_ref_pages.append(p)
+                for para in cur_paragraphs:
+                    bb = _v2_block_bbox(para)
+                    if bb:
+                        pending_ref_bboxes.append(bb)
             for ac in cur_assets:
                 ac.setdefault("paragraph_index", -1)
                 chunks.append(ac)
@@ -2089,6 +2141,7 @@ def build_knowledge_blocks(
                 continue
             if page_idx not in cur_pages:
                 cur_pages.append(page_idx)
+            item["_page"] = page_idx  # 供 _v2_block_bbox 取页号 (content_list_v2 item 不带页号)
             if t == "list" and _is_mineru_reference_list(item):
                 ref_texts = _reference_list_item_texts(item)
                 if _is_bibliography_reference_list(ref_texts):
@@ -2105,6 +2158,9 @@ def build_knowledge_blocks(
                         )
                         if page_idx not in pending_ref_pages:
                             pending_ref_pages.append(page_idx)
+                        bb = _v2_block_bbox(item)
+                        if bb:
+                            pending_ref_bboxes.append(bb)
                     continue
             if t in ("paragraph", "equation_interline", "list"):
                 cur_paragraphs.append(item)
@@ -2266,6 +2322,7 @@ def build_knowledge_blocks(
                     "context": "",
                     "related_assets": [],
                     "paragraph_index": 0,  # 0 表示是合成的, 不参与正文段落计数
+                    "bboxes": [],  # LLM 合成摘要无源 block, 没有定位框
                     "synthesized": True,
                 }
                 insert_at = 0
@@ -2297,6 +2354,7 @@ def build_knowledge_blocks(
             "context": "",
             "related_assets": [],
             "paragraph_index": -1,
+            "bboxes": [],  # title 来自 PDF 文件名, 无源 block 定位框
         }
         chunks.insert(0, title_chunk)
         logger.info(
@@ -2305,9 +2363,10 @@ def build_knowledge_blocks(
     else:
         logger.info("[title] 未提供 doc_title, 该文档不会有 title chunk")
 
-    # 确保所有 chunk 都有 paragraph_index 字段 (避免下游 KeyError)
+    # 确保所有 chunk 都有 paragraph_index / bboxes 字段 (避免下游 KeyError; 兜底空框)
     for c in chunks:
         c.setdefault("paragraph_index", -1)
+        c.setdefault("bboxes", [])
 
     return chunks
 

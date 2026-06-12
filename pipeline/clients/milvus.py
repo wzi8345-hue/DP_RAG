@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -22,6 +23,12 @@ except ImportError:
     sys.exit(1)
 
 logger = logging.getLogger(__name__)
+
+# 进程级 Milvus 写入锁: 批量灌入时并发上传任务会用同一个 (注册表缓存的)
+# MilvusIngester。把每篇的 purge+upsert RPC 串行化, 保证同一时刻只有一个
+# 写入者打到 Milvus / 共享盘, 避免并发段封存 + 索引构建把 GPFS IO 打满导致
+# Milvus 卡死 (D 状态不可杀)。parse / embed 仍并发, 只有写库这一步串行。
+_INGEST_WRITE_LOCK = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # 默认配置
@@ -262,7 +269,7 @@ def build_schema(
     schema = client.create_schema(
         auto_id=False,
         enable_dynamic_field=False,
-        description="literature chunks (summary/text/title/table/image/equation/references) with dense + BM25 sparse embeddings; v5 (equation + references)",
+        description="literature chunks (summary/text/title/table/image/equation/references) with dense + BM25 sparse embeddings; v6 (+ bboxes 源块定位框)",
     )
     schema.add_field("pk", DataType.VARCHAR, is_primary=True, max_length=MAX_LEN_PK)
     schema.add_field("doc_id", DataType.VARCHAR, max_length=MAX_LEN_DOC_ID)
@@ -278,6 +285,10 @@ def build_schema(
     schema.add_field("content", DataType.VARCHAR, max_length=MAX_LEN_CONTENT)
     schema.add_field("context", DataType.VARCHAR, max_length=MAX_LEN_CONTEXT)
     schema.add_field("related_assets", DataType.JSON)
+    # bboxes: chunk 文本在原 PDF 中的源块定位框列表, 每项 {"page": int,
+    # "bbox": [x1, y1, x2, y2]} (页内归一化 0~1, 原点左上)。一个 chunk 可能由多个
+    # 源块合并/切分而来 (1:N), 故为列表; LLM 合成摘要等无源块时为空列表。
+    schema.add_field("bboxes", DataType.JSON)
     # embedding_text 开启 analyzer, 作为 BM25 Function 的输入
     schema.add_field(
         "embedding_text",
@@ -493,13 +504,37 @@ def _normalize_related_assets(ra: Any) -> List[Dict[str, Any]]:
     return out
 
 
+def _normalize_bboxes(bb: Any) -> List[Dict[str, Any]]:
+    """规整 chunk.bboxes -> [{"page": int, "bbox": [x1,y1,x2,y2]}]。
+
+    容错: 非 list / 元素缺字段 / 坐标非 4 个一律跳过, 保证写入 Milvus JSON 字段
+    的结构稳定。无源块的 chunk (如 LLM 合成摘要) 返回空列表。
+    """
+    if not isinstance(bb, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for item in bb:
+        if not isinstance(item, dict):
+            continue
+        coords = item.get("bbox")
+        if not isinstance(coords, (list, tuple)) or len(coords) != 4:
+            continue
+        try:
+            page = int(item.get("page", 0))
+            box = [float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3])]
+        except (TypeError, ValueError):
+            continue
+        out.append({"page": page, "bbox": box})
+    return out
+
+
 def chunk_to_row(
     chunk: Dict[str, Any],
     doc_id: str,
     doc_name: str,
     publication_year: int = 0,
 ) -> Dict[str, Any]:
-    """把单条 chunk 转成 Milvus 一行数据 (v4 schema)。"""
+    """把单条 chunk 转成 Milvus 一行数据 (v6 schema)。"""
     chunk_id = chunk.get("id") or ""
     pages = chunk.get("pages") or []
     page_start = int(pages[0]) if pages else -1
@@ -522,6 +557,7 @@ def chunk_to_row(
         "content": _truncate(chunk.get("content") or "", MAX_LEN_CONTENT),
         "context": _truncate(chunk.get("context") or "", MAX_LEN_CONTEXT),
         "related_assets": _normalize_related_assets(chunk.get("related_assets")),
+        "bboxes": _normalize_bboxes(chunk.get("bboxes")),
         "embedding_text": _truncate(chunk.get("embedding_text") or "", MAX_LEN_EMB_TEXT),
         "embedding": chunk["embedding"],
     }
@@ -765,7 +801,11 @@ class MilvusIngester:
                 collection_desc = self.client.describe_collection(self.collection)
                 fields = collection_desc.get("fields", [])
                 field_names = {f["name"] for f in fields}
-                # v4 schema 必备字段 (在 v3 上新增 paragraph_index)
+                self._collection_field_names = set(field_names)
+                # 必备字段 (硬兼容门槛)。注意: v6 新增的 bboxes 是「可选附加」字段,
+                # 不列入此处 —— 旧 (v5) 集合缺它仍可正常读/检索 (前端只是无源块高亮),
+                # ingest 时也会按集合实际 schema 自动剔除 bboxes (见 ingest_file),
+                # 不再因缺 bboxes 而拒绝打开集合 (否则会拖垮所有既有集合的检索)。
                 required_fields = {
                     "pk", "doc_id", "publication_year",
                     "embedding", "sparse_embedding",
@@ -777,8 +817,7 @@ class MilvusIngester:
                         f"\n[ERROR] 现有集合 '{self.collection}' schema 缺少字段: {missing}"
                     )
                     logger.error(
-                        "        v3 -> v4 schema 不兼容 (新增 paragraph_index 字段)。"
-                        " 请用 recreate=True 重建集合并重新灌入数据。"
+                        "        schema 不兼容。 请用 recreate=True 重建集合并重新灌入数据。"
                     )
                     raise SystemExit(1)
 
@@ -832,6 +871,13 @@ class MilvusIngester:
                 collection_name=self.collection, schema=schema,
             )
             self._create_all_indexes()
+            try:
+                desc = self.client.describe_collection(self.collection)
+                self._collection_field_names = {
+                    f["name"] for f in desc.get("fields", [])
+                }
+            except Exception:
+                self._collection_field_names = None
 
         is_lite = (str(self._uri).endswith(".db") or "://" not in str(self._uri))
         if not is_lite:
@@ -922,9 +968,12 @@ class MilvusIngester:
             publication_year=publication_year, explicit=meta_json_path,
         )
 
-        if purge_existing:
-            self.purge_doc(doc_id)
-
+        # 行构建是纯 CPU, 放锁外; 真正打 Milvus 的 purge + upsert 才进写入锁,
+        # 让并发上传线程的写库阶段串行 (一个写入者), 减轻共享盘 IO 突发压力。
+        # 旧 (v5) 集合没有 bboxes 字段且 dynamic_field 关闭, 直接 upsert 含 bboxes
+        # 的行会被 Milvus 拒绝。按集合实际 schema 剔除多余键 (主要是 bboxes),
+        # 使「往旧集合追加」仍可工作 (只是这些 chunk 没有源块定位框)。
+        allowed = getattr(self, "_collection_field_names", None)
         rows: List[Dict[str, Any]] = []
         type_count: Dict[str, int] = {}
         for c in chunks:
@@ -932,19 +981,24 @@ class MilvusIngester:
                 c, doc_id=doc_id, doc_name=doc_name,
                 publication_year=publication_year,
             )
+            if allowed:
+                row = {k: v for k, v in row.items() if k in allowed}
             rows.append(row)
             type_count[row["type"]] = type_count.get(row["type"], 0) + 1
 
         ok = 0
-        for i in range(0, len(rows), batch_size):
-            batch = rows[i: i + batch_size]
-            self._call_with_reconnect(
-                self.client.upsert,
-                collection_name=self.collection,
-                data=batch,
-            )
-            ok += len(batch)
-            logger.info(f"    [{path}] upsert {ok}/{len(rows)}")
+        with _INGEST_WRITE_LOCK:
+            if purge_existing:
+                self.purge_doc(doc_id)
+            for i in range(0, len(rows), batch_size):
+                batch = rows[i: i + batch_size]
+                self._call_with_reconnect(
+                    self.client.upsert,
+                    collection_name=self.collection,
+                    data=batch,
+                )
+                ok += len(batch)
+                logger.info(f"    [{path}] upsert {ok}/{len(rows)}")
 
         return {
             "path": path,
@@ -1035,6 +1089,22 @@ class MilvusIngester:
                     pass
         logger.info(f"[list_doc_ids] 集合中已有 {len(doc_ids)} 个 doc_id")
         return doc_ids
+
+    def row_count(self) -> int:
+        """O(1) 行数 (get_collection_stats), 不扫全表。
+
+        供批量灌入的进度日志使用 — 替代每篇都跑一次全表 ``stats()`` 扫描
+        (那会让批量灌库退化成 O(N²) 全表扫描, 与写入争抢共享盘 IO)。
+        失败返回 -1 (仅用于日志, 不影响灌入)。
+        """
+        try:
+            info = self._call_with_reconnect(
+                self.client.get_collection_stats, self.collection,
+            )
+            return int(info.get("row_count", 0) or 0)
+        except Exception as e:
+            logger.debug(f"[milvus] row_count 失败: {e}")
+            return -1
 
     def stats(self, page_size: int = STATS_PAGE_SIZE) -> Dict[str, Any]:
         try:

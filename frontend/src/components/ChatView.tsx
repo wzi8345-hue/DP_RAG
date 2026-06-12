@@ -22,7 +22,12 @@ import {
   newConversationId,
   saveConversation,
 } from "../lib/conversations";
-import { SourcesPanel, type PanelTab, type SourceItem } from "./SourcesPanel";
+import {
+  SourcesPanel,
+  type PanelTab,
+  type PdfTarget,
+  type SourceItem,
+} from "./SourcesPanel";
 
 export interface Message {
   id: string;
@@ -30,6 +35,8 @@ export interface Message {
   content: string;
   hits?: Hit[];
   context?: string;
+  /** 本条回答检索使用的知识库集合 (取原文 PDF / 定位框时需要) */
+  collection?: string;
   latency?: number;
   status?: string;
   error?: string;
@@ -116,6 +123,9 @@ export function ChatView({
     num?: number;
     docId?: string;
   } | null>(null);
+  const [pdfTarget, setPdfTarget] = useState<
+    (PdfTarget & { msgId: string }) | null
+  >(null);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -144,6 +154,7 @@ export function ChatView({
     }
     setSourcesFor(null);
     setHighlight(null);
+    setPdfTarget(null);
   }, [conversationId]);
 
   // 一轮对话完成 (busy true→false) 时持久化当前会话
@@ -199,6 +210,7 @@ export function ChatView({
       content: "",
       streaming: true,
       expert,
+      collection: settings.collection || DEFAULT_COLLECTION,
       status: expert ? "研究中：思考检索策略…" : "检索中…",
     };
     setMessages((ms) => [...ms, userMsg, aMsg]);
@@ -345,6 +357,7 @@ export function ChatView({
     setMessages([]);
     setSourcesFor(null);
     setHighlight(null);
+    setPdfTarget(null);
     setSessionId(null);
     activeConvIdRef.current = null;
     onConversationIdChange?.(null);
@@ -356,10 +369,49 @@ export function ChatView({
     setHighlight(null);
   };
 
-  const onCite = (msgId: string, num: number, docId?: string) => {
+  // 真实 chunk_id 形如 text_8bb1f28e; 专家模式数字引用映射为 doc#n, 无源块定位
+  const isRealChunk = (id?: string) => !!id && /^[a-z]+_[0-9a-f]{4,}$/i.test(id);
+
+  // 取该 chunk 的定位框并切到「原文」tab; PDF 始终展示, 无框时仅不高亮
+  const openPdf = (
+    msgId: string,
+    docId: string,
+    chunkId: string,
+    docName?: string
+  ) => {
     setSourcesFor(msgId);
-    setPanelTab("summary");
+    setPanelTab("pdf");
+    const msg = messagesRef.current.find((m) => m.id === msgId);
+    const coll = msg?.collection || settings.collection || DEFAULT_COLLECTION;
+    const key = `${msgId}:${chunkId}:${Date.now()}`;
+    setPdfTarget({ msgId, docId, docName, chunkId, bboxes: [], key });
+    api
+      .getChunkBbox(coll, docId, chunkId)
+      .then((r) =>
+        setPdfTarget((prev) =>
+          prev && prev.key === key ? { ...prev, bboxes: r.bboxes || [] } : prev
+        )
+      )
+      .catch(() => {
+        /* PDF 仍可展示, 仅无高亮 */
+      });
+  };
+
+  const onCite = (
+    msgId: string,
+    num: number,
+    docId?: string,
+    chunkId?: string,
+    docName?: string
+  ) => {
+    setSourcesFor(msgId);
     setHighlight({ msgId, num, docId });
+    if (docId && isRealChunk(chunkId)) {
+      openPdf(msgId, docId, chunkId!, docName);
+    } else {
+      // 专家模式文献级引用 / 无源块: 回退到文献简介定位
+      setPanelTab("summary");
+    }
   };
 
   // 当前展示来源的消息: 优先只列回答里实际引用的块, 没有引用时回退到全部命中
@@ -438,7 +490,9 @@ export function ChatView({
                   key={m.id}
                   msg={m}
                   onShowSources={() => showSources(m.id)}
-                  onCite={(num, docId) => onCite(m.id, num, docId)}
+                  onCite={(num, docId, chunkId, docName) =>
+                    onCite(m.id, num, docId, chunkId, docName)
+                  }
                   active={sourcesFor === m.id}
                 />
               ))}
@@ -486,13 +540,17 @@ export function ChatView({
         <SourcesPanel
           items={activeItems}
           api={api}
+          collection={activeMsg?.collection || settings.collection || DEFAULT_COLLECTION}
           tab={panelTab}
           onTabChange={setPanelTab}
           highlightNum={highlight?.msgId === sourcesFor ? highlight.num : null}
           highlightDocId={highlight?.msgId === sourcesFor ? highlight.docId : null}
+          pdfTarget={pdfTarget?.msgId === sourcesFor ? pdfTarget : null}
+          onOpenPdf={(docId, chunkId) => openPdf(sourcesFor, docId, chunkId)}
           onClose={() => {
             setSourcesFor(null);
             setHighlight(null);
+            setPdfTarget(null);
           }}
         />
       )}
@@ -508,7 +566,7 @@ function Bubble({
 }: {
   msg: Message;
   onShowSources: () => void;
-  onCite: (num: number, docId?: string) => void;
+  onCite: (num: number, docId?: string, chunkId?: string, docName?: string) => void;
   active: boolean;
 }) {
   const parsed = useMemo(
@@ -519,11 +577,18 @@ function Bubble({
     ? parsed.citedHits.length
     : msg.hits?.length ?? 0;
 
-  // num -> docId, 供角标点击时定位到对应文献简介
-  const docIdByNum = useMemo(() => {
-    const map = new Map<number, string>();
+  // num -> 引用信息 (docId/chunkId/docName), 供角标点击时定位 PDF 或文献简介
+  const citeByNum = useMemo(() => {
+    const map = new Map<
+      number,
+      { docId: string; chunkId: string; docName: string }
+    >();
     for (const c of parsed.citedHits) {
-      map.set(c.num, c.hit.doc_id || c.hit.doc_name || "");
+      map.set(c.num, {
+        docId: c.hit.doc_id || c.hit.doc_name || "",
+        chunkId: c.chunkId || c.hit.chunk_id || "",
+        docName: c.hit.doc_name || c.hit.doc_id || "",
+      });
     }
     return map;
   }, [parsed.citedHits]);
@@ -547,9 +612,10 @@ function Bubble({
               className="cite-marker"
               onClick={(e) => {
                 e.preventDefault();
-                onCite(num, docIdByNum.get(num));
+                const info = citeByNum.get(num);
+                onCite(num, info?.docId, info?.chunkId, info?.docName);
               }}
-              title="查看引用文献简介"
+              title="查看原文定位 / 文献简介"
             >
               {num}
             </button>
@@ -562,7 +628,7 @@ function Bubble({
         );
       },
     }),
-    [onCite, docIdByNum]
+    [onCite, citeByNum]
   );
 
   if (msg.role === "user") {

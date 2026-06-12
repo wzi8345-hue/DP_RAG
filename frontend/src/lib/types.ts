@@ -2,6 +2,13 @@
 
 export type RetrievalMode = "hybrid" | "vector" | "metadata";
 
+/** 源块在原 PDF 中的定位框: page 为 0-based 页码, bbox 为页内归一化坐标
+ * [x1,y1,x2,y2] (0~1, 原点左上)。 */
+export interface BBox {
+  page: number;
+  bbox: [number, number, number, number];
+}
+
 export interface Hit {
   pk?: string;
   chunk_id?: string;
@@ -15,6 +22,7 @@ export interface Hit {
   content?: string;
   context?: string;
   related_assets?: Array<Record<string, unknown>>;
+  bboxes?: BBox[];
   score?: number;
   rrf_score?: number;
   sources?: string[];
@@ -114,6 +122,13 @@ export interface DocSummaryResponse {
   title: string;
   year?: number | null;
   summary: string;
+  found: boolean;
+}
+
+/** GET /files/chunk_bbox 响应: 某 chunk 在 PDF 中的定位框 */
+export interface ChunkBboxResponse {
+  bboxes: BBox[];
+  page_start?: number | null;
   found: boolean;
 }
 
