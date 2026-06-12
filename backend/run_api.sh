@@ -24,7 +24,7 @@ fi
 echo "[run_api] 启动后端 :$PORT, 日志 -> $LOG_FILE"
 PYTHONUNBUFFERED=1 \
 CONFIG_PATH="${CONFIG_PATH:-local_api_config.yaml}" \
-CORS_ORIGINS="${CORS_ORIGINS:-*}" \
+CORS_ORIGINS="${CORS_ORIGINS:-https://rag.hal9k.one,http://localhost:9527}" \
 API_PORT="$PORT" \
 nohup .venv-api/bin/python run_api.py >>"$LOG_FILE" 2>&1 &
 

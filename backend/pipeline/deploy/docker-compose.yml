@@ -125,7 +125,7 @@ services:
       UPLOAD_DIR: "/app/uploads"
       SESSION_TTL: "1800"
       TASK_MAX_WORKERS: "2"
-      CORS_ORIGINS: "*"
+      CORS_ORIGINS: "https://rag.hal9k.one,http://localhost:9527"
     depends_on:
       vllm-llm:
         condition: service_healthy

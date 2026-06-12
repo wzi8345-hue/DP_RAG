@@ -96,7 +96,8 @@ def create_app() -> FastAPI:
     )
 
     # CORS: 前端跨域。带凭证时不能用 "*"; 显式来源才允许 credentials。
-    origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
+    _default_origins = "https://rag.hal9k.one,http://localhost:9527"
+    origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", _default_origins).split(",") if o.strip()]
     allow_credentials = origins != ["*"]
     app.add_middleware(
         CORSMiddleware,
