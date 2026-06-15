@@ -46,6 +46,7 @@ from ..routing.research import (
     plan_research,
 )
 from ..routing.research_skills import ResearchSkill, evaluate_guards, select_skill
+from ..processors.chunker import sanitize_section
 from .agentic import AgenticRAGPipeline
 from .reflect_summary import (
     ReflectSummaryConfig,
@@ -346,6 +347,10 @@ def _build_research_context(
         )
 
     lines.append(f"# 证据材料 (共 {len(groups)} 篇文献 / {len(evidence)} 条片段, 按重要性排序)")
+    lines.append(
+        "（每条证据前的方括号是其 chunk 头, 含 chunk_id / section / page / para 等引用所需字段; "
+        "page、para 均为 1-based。引用时请照抄 chunk_id。）"
+    )
     # #5: 按文献累计分排序, 重要文献给更多证据条数预算 (8/5/3 分层), 替代统一 top-6
     ordered = sorted(groups.items(), key=lambda kv: _doc_agg_score(kv[1]), reverse=True)
     n_docs = len(ordered)
@@ -357,13 +362,24 @@ def _build_research_context(
         lines.append(f"\n## [{i}] {name}")
         for h in chosen:
             snippet = _lg_snippet(h.content, snippet_chars)
+            # chunk 头: 与快速检索 (agentic) 同款锚点, 让综述能产出可定位到原文的 chunk 级引用
+            bits: List[str] = []
+            if h.chunk_id:
+                bits.append(f"chunk_id={h.chunk_id}")
+            sec = sanitize_section(h.section)
+            if sec:
+                bits.append(f"section={sec}")
+            if isinstance(h.page_start, int) and h.page_start >= 0:
+                bits.append(f"page={h.page_start + 1}")  # 1-based
+            if isinstance(h.paragraph_index, int) and h.paragraph_index >= 1:
+                bits.append(f"para={h.paragraph_index}")
+            head = " | ".join(bits) or "no-chunk-id"
             score = ""
             if h.rerank_score is not None:
                 score = f" (rerank={h.rerank_score:.3f})"
             elif h.score:
                 score = f" (emb={h.score:.3f})"
-            page = (h.page_start + 1) if isinstance(h.page_start, int) else "?"
-            lines.append(f"- [page {page}{score}] {snippet}")
+            lines.append(f"- [{head}]{score} {snippet}")
 
     gaps = state.get("research_gaps") or []
     if gaps:
@@ -1484,15 +1500,21 @@ RESEARCH_SYNTHESIS_SYSTEM = (
     "## 核心结论\n"
     "用 3-5 句直接回答'研究目标', 给出最关键的发现。\n\n"
     "## 分论点与文献依据\n"
-    "按研究维度/主题分小节展开, 每个关键论点后用文献名标注来源 (如 [文献名 或 编号])。\n\n"
+    "按研究维度/主题分小节展开, 每个关键论点末尾用方括号引用对应证据 chunk, "
+    "格式: [chunk_id, section, page N, para M] (page/para 为 1-based, 无 para 可省略), "
+    "chunk_id 照抄证据材料里每条片段方括号中的 chunk_id。"
+    "例如: ...锈层致密度更高 [text_a1b2c3d4, 锈层结构, page 2, para 5]。\n\n"
     "## 证据要点表\n"
-    "用 Markdown 表格汇总关键定量/定性证据, 列建议为: 维度 | 关键发现 | 来源文献。\n\n"
+    "用 Markdown 表格汇总关键定量/定性证据, 列建议为: 维度 | 关键发现 | 来源, "
+    "其中'来源'列填上述 chunk 引用 (同样的 [chunk_id, ...] 格式)。\n\n"
     "## 共识与分歧\n"
     "明确指出多篇文献达成共识之处, 以及结论不一致/有争议之处 (若证据不足以判断, 直说)。\n\n"
     "## 证据缺口与下一步\n"
     "客观列出当前证据未能覆盖的问题, 以及建议的后续检索/研究方向。\n\n"
     "硬性要求:\n"
     "- 关键论点必须可溯源到给定证据材料, 严禁编造材料中不存在的数据或结论;\n"
+    "- 引用一律用证据材料中真实存在的 chunk_id (形如 text_xxx / table_xxx / summary_xxx), "
+    "严禁编造 chunk_id, 也不要只写文献名或纯数字编号;\n"
     "- **逐一核对'研究维度'**: 只对'证据材料'中确有对应内容的维度展开论述; 对没有任何证据材料支撑的维度, "
     "**严禁编造或脑补**, 必须把它明确列入'## 证据缺口与下一步'并说明'当前检索未覆盖';\n"
     "- 证据不足时如实说明, 不要臆测填充;\n"
